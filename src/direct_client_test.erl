@@ -46,6 +46,9 @@ lifecycle_test() -> test_util:lifecycle_test(new_connection()).
 
 basic_ack_test() ->test_util:basic_ack_test(new_connection()).
 
+queue_unbind_test() ->
+    test_util:queue_unbind_test(new_connection()).
+
 %----------------------------------------------------------------------------
 % Negative Tests
 

@@ -52,6 +52,9 @@ basic_ack_test() ->
 
 channel_lifecycle_test() ->
   test_util:channel_lifecycle_test(new_connection()).
+  
+queue_unbind_test() ->
+    test_util:queue_unbind_test(new_connection()).
 
 %----------------------------------------------------------------------------
 % Negative Tests
