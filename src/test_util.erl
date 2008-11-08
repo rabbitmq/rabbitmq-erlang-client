@@ -85,6 +85,20 @@ channel_lifecycle_test(Connection) ->
     lib_amqp:teardown(Connection, Channel2),
     ok.
 
+% This is designed to exercize the internal queuing mechanism
+% to ensure that commands are properly serialized
+command_serialization_test(Connection) ->
+    Channel = lib_amqp:start_channel(Connection),
+    Parent = self(),
+    [spawn(fun() -> 
+                Q = uuid(),
+                Q1 = lib_amqp:declare_queue(Channel, Q),
+                ?assertMatch(Q, Q1),     
+                Parent ! finished
+           end) || Tag <- lists:seq(1,?Latch)],
+    latch_loop(?Latch),
+    lib_amqp:teardown(Connection, Channel).
+
 queue_unbind_test(Connection) ->
     X = <<"eggs">>, Q = <<"foobar">>, Key = <<"quay">>,
     Payload = <<"foobar">>,
