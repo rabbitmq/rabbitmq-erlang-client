@@ -51,12 +51,16 @@ close_channel(Channel) ->
     #'channel.close_ok'{} = amqp_channel:call(Channel, ChannelClose),
     ok.
 
-teardown(Connection, Channel) ->
-    close_channel(Channel),
+close_connection(Connection) ->
     ConnectionClose = #'connection.close'{reply_code = 200, reply_text = <<"Goodbye">>,
                                               class_id = 0, method_id = 0},
     #'connection.close_ok'{} = amqp_connection:close(Connection, ConnectionClose),
     ok.
+
+teardown(Connection, Channel) ->
+    close_channel(Channel),
+    close_connection(Connection).
+
 
 get(Channel, Q) -> get(Channel, Q, true).
 
@@ -130,3 +134,8 @@ bind_queue(Channel, X, Q, Binding) ->
     QueueBind = #'queue.bind'{queue = Q, exchange = X,
                               routing_key = Binding, nowait = false, arguments = []},
     #'queue.bind_ok'{} = amqp_channel:call(Channel, QueueBind).
+
+unbind_queue(Channel, X, Q, Binding) ->
+    Unbind = #'queue.unbind'{queue = Q, exchange = X,
+                             routing_key = Binding, arguments = []},
+    #'queue.unbind_ok'{} = amqp_channel:call(Channel, Unbind).
