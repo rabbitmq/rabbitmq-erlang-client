@@ -22,43 +22,39 @@
 %%
 %%   Contributor(s): Ben Hood <0x6e6562@gmail.com>.
 %%
-
--module(direct_client_test).
-
--define(RPC_TIMEOUT, 10000).
--define(RPC_SLEEP, 500).
-
--export([test_coverage/0]).
+-module(negative_test_util).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("rabbitmq_server/include/rabbit_framing.hrl").
 
-basic_get_test() -> test_util:basic_get_test(new_connection()).
+-compile(export_all).
 
-basic_return_test() -> test_util:basic_return_test(new_connection()).
+non_existent_exchange_test(Connection) ->
+    {A,B,C} = now(),
+    X = <<A:32,B:32,C:32>>,
+    RoutingKey = <<"a">>, 
+    Payload = <<"foobar">>,
+    Channel = lib_amqp:start_channel(Connection),
+    lib_amqp:declare_exchange(Channel, X),
+    %% Deliberately mix up the routingkey and exchange arguments
+    lib_amqp:publish(Channel, RoutingKey, X, Payload),
+    wait_for_death(Channel),
+    ?assert(is_process_alive(Connection)),
+    lib_amqp:close_connection(Connection).
 
-basic_qos_test() -> test_util:basic_qos_test(new_connection()).
+hard_error_test(Connection) ->
+    Channel = lib_amqp:start_channel(Connection),
+    try
+        amqp_channel:call(Channel, #'basic.qos'{global = true})
+    catch
+        exit:_ -> ok;
+        _:_    -> exit(did_not_throw_error)
+    end,
+    wait_for_death(Channel),
+    wait_for_death(Connection).
 
-basic_recover_test() -> test_util:basic_recover_test(new_connection()).
-
-basic_consume_test() -> test_util:basic_consume_test(new_connection()).
-
-lifecycle_test() -> test_util:lifecycle_test(new_connection()).
-
-basic_ack_test() ->test_util:basic_ack_test(new_connection()).
-
-%----------------------------------------------------------------------------
-% Negative Tests
-
-non_existent_exchange_test() -> 
-    negative_test_util:non_existent_exchange_test(new_connection()).
-
-%----------------------------------------------------------------------------
-%% Common Functions
-
-new_connection() -> amqp_connection:start("guest", "guest").
-
-test_coverage() ->
-    rabbit_misc:enable_cover(),
-    test(),
-    rabbit_misc:report_cover().
-
+wait_for_death(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    receive {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 1000 -> ?assert(false), ok
+    end.
