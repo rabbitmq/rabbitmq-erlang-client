@@ -29,39 +29,59 @@
 -define(RPC_SLEEP, 500).
 
 -export([test_coverage/0]).
+-export([test_channel_flow/0]).
 
 -include_lib("eunit/include/eunit.hrl").
 
-basic_get_test() -> test_util:basic_get_test(new_connection()).
+basic_get_test() -> 
+    test_util:basic_get_test(new_connection()).
 
-basic_return_test() -> test_util:basic_return_test(new_connection()).
+basic_return_test() ->
+    test_util:basic_return_test(new_connection()).
 
-basic_qos_test() -> test_util:basic_qos_test(new_connection()).
+basic_qos_test() ->
+    test_util:basic_qos_test(new_connection()).
 
-basic_recover_test() -> test_util:basic_recover_test(new_connection()).
+basic_recover_test() ->
+    test_util:basic_recover_test(new_connection()).
 
-basic_consume_test() -> test_util:basic_consume_test(new_connection()).
+basic_consume_test() ->
+    test_util:basic_consume_test(new_connection()).
 
-lifecycle_test() -> test_util:lifecycle_test(new_connection()).
+lifecycle_test() ->
+    test_util:lifecycle_test(new_connection()).
 
-basic_ack_test() ->test_util:basic_ack_test(new_connection()).
+basic_ack_test() ->
+    test_util:basic_ack_test(new_connection()).
+
+command_serialization_test() ->
+    test_util:command_serialization_test(new_connection()).
 
 queue_unbind_test() ->
     test_util:queue_unbind_test(new_connection()).
 
-command_serialization_test() -> 
-    test_util:command_serialization_test(new_connection()).
+%%---------------------------------------------------------------------------
+%% This must be kicked off manually because it can only be run after Rabbit
+%% has been running for 1 minute
+test_channel_flow() ->
+    test_util:channel_flow_test(new_connection()).
 
-%----------------------------------------------------------------------------
-% Negative Tests
+%%---------------------------------------------------------------------------
+%% Negative Tests
+%%---------------------------------------------------------------------------
 
 non_existent_exchange_test() -> 
     negative_test_util:non_existent_exchange_test(new_connection()).
 
-%----------------------------------------------------------------------------
-%% Common Functions
+hard_error_test() ->
+    negative_test_util:hard_error_test(new_connection()).
 
-new_connection() -> amqp_connection:start("guest", "guest").
+%%---------------------------------------------------------------------------
+%% Common Functions
+%%---------------------------------------------------------------------------
+
+new_connection() ->
+    amqp_connection:start("guest", "guest").
 
 test_coverage() ->
     rabbit_misc:enable_cover(),
