@@ -34,8 +34,14 @@
 start_connection() ->
     amqp_connection:start("guest", "guest").
 
+start_connection(Username, Password) ->
+    amqp_connection:start(Username, Password).
+
 start_connection(Host) ->
     amqp_connection:start("guest", "guest", Host).
+
+start_connection(Username, Password, Host) ->
+    amqp_connection:start(Username, Password, Host).
 
 start_channel(Connection) ->
     amqp_connection:open_channel(Connection).
