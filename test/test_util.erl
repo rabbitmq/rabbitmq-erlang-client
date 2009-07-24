@@ -25,8 +25,8 @@
 
 -module(test_util).
 
--include_lib("rabbitmq_server/include/rabbit.hrl").
--include_lib("rabbitmq_server/include/rabbit_framing.hrl").
+-include_lib("rabbit.hrl").
+-include_lib("rabbit_framing.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("amqp_client.hrl").
 
@@ -127,9 +127,6 @@ get_and_assert_empty(Channel, Q) ->
 get_and_assert_equals(Channel, Q, Payload) ->
     Content = lib_amqp:get(Channel, Q),
     #content{payload_fragments_rev = PayloadFragments} = Content,
-    ?assertMatch([Payload], PayloadFragments).
-
-             payload_fragments_rev = PayloadFragments} = Content,
     ?assertMatch([Payload], PayloadFragments).
 
 basic_get_test(Connection) ->
@@ -297,54 +294,6 @@ producer_loop(Channel, RoutingKey, N) ->
 %% Reject is not yet implemented in RabbitMQ
 basic_reject_test(Connection) ->
     lib_amqp:close_connection(Connection).
-    
-% This is a test, albeit not a unit test, to see if the client
-% handles the channel.flow command.
-% test_util:start_channel_flow(lib_amqp:start_connection("localhost")).
-start_channel_flow(Connection) ->
-    crypto:start(),
-    X = <<"amq.direct">>,
-    Key = uuid(),
-    Producer = spawn_link(fun() ->
-                            Channel = lib_amqp:start_channel(Connection),
-                            amqp_channel:register_flow_handler(Channel, 
-                                                               self()),                            
-                            cf_producer_loop(Channel, X, Key)
-                          end),
-    Consumer = spawn_link(fun() ->
-                            Channel = lib_amqp:start_channel(Connection),
-                            Q = lib_amqp:declare_queue(Channel),                            
-                            lib_amqp:bind_queue(Channel, X, Q, Key),
-                            Tag = lib_amqp:subscribe(Channel, Q, self()),
-                            cf_consumer_loop(Channel, Tag)
-                          end),
-    {Producer, Consumer}.
-
-cf_consumer_loop(Channel, Tag) ->
-    receive
-        #'basic.consume_ok'{} -> cf_consumer_loop(Channel, Tag);
-        #'basic.cancel_ok'{} -> ok;
-        {#'basic.deliver'{delivery_tag = DeliveryTag}, Content} ->
-             lib_amqp:ack(Channel, DeliveryTag),
-             cf_consumer_loop(Channel, Tag);
-        stop ->
-             lib_amqp:unsubscribe(Channel, Tag),
-             ok
-    end.
-
-cf_producer_loop(Channel, X, Key) ->
-    receive
-        resume ->
-            cf_producer_loop(Channel, X, Key);
-        pause ->
-            receive
-                resume -> cf_producer_loop(Channel, X, Key)
-            end;
-        stop -> ok
-    after 5 ->
-        lib_amqp:publish(Channel, X, Key, crypto:rand_bytes(10000)),
-        cf_producer_loop(Channel, X, Key)
-    end.
 
 %%----------------------------------------------------------------------------
 %% Unit test for the direct client
