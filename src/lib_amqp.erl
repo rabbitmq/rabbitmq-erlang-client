@@ -34,17 +34,20 @@
 start_connection() ->
     amqp_connection:start_direct("guest", "guest").
 
-start_connection(Username, Password) ->
-    amqp_connection:start(Username, Password).
-
 start_connection(Host) ->
     start_connection(Host, ?PROTOCOL_PORT).
 
-start_connection(Host, Port) ->
-    amqp_connection:start_network("guest", "guest", Host, Port).
+start_connection(Host, Port) when is_number(Port) ->
+    start_connection("guest", "guest", Host, Port);
+
+start_connection(Username, Password) ->
+    amqp_connection:start(Username, Password).
 
 start_connection(Username, Password, Host) ->
     amqp_connection:start(Username, Password, Host).
+
+start_connection(Username, Password, Host, Port) ->
+    amqp_connection:start_network(Username, Password, Host, Port).
 
 start_channel(Connection) ->
     amqp_connection:open_channel(Connection).
