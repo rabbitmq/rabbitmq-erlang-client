@@ -31,6 +31,9 @@
 
 -compile(export_all).
 
+%% --------------------------------------------------------------------------
+%% Connection
+
 start_connection() ->
     amqp_connection:start_direct("guest", "guest").
 
@@ -49,8 +52,43 @@ start_connection(Username, Password, Host) ->
 start_connection(Username, Password, Host, Port) ->
     amqp_connection:start_network(Username, Password, Host, Port).
 
+
+close_connection(Connection) ->
+    ConnectionClose = #'connection.close'{reply_code = 200,
+                                          reply_text = <<"Goodbye">>,
+                                          class_id = 0,
+                                          method_id = 0},
+    #'connection.close_ok'{} = amqp_connection:close(Connection,
+                                                     ConnectionClose),
+    ok.
+
+
+%% --------------------------------------------------------------------------
+%% Channel
+
 start_channel(Connection) ->
     amqp_connection:open_channel(Connection).
+
+
+close_channel(Channel) ->
+    ChannelClose = #'channel.close'{reply_code = 200,
+                                    reply_text = <<"Goodbye">>,
+                                    class_id = 0,
+                                    method_id = 0},
+    #'channel.close_ok'{} = amqp_channel:call(Channel, ChannelClose),
+    ok.
+
+
+teardown(Connection, Channel) ->
+    close_channel(Channel),
+    close_connection(Connection).
+
+
+%% --------------------------------------------------------------------------
+%% Exchange
+
+declare_exchange(Channel, ExchangeDeclare = #'exchange.declare'{}) ->
+    amqp_channel:call(Channel, ExchangeDeclare);
 
 declare_exchange(Channel, X) ->
     declare_exchange(Channel, X, <<"direct">>).
@@ -58,15 +96,78 @@ declare_exchange(Channel, X) ->
 declare_exchange(Channel, X, Type) ->
     ExchangeDeclare = #'exchange.declare'{exchange = X,
                                           type = Type},
-    amqp_channel:call(Channel, ExchangeDeclare).
+    declare_exchange(Channel, ExchangeDeclare).
+
+
+delete_exchange(Channel, ExchangeDelete = #'exchange.delete'{}) ->
+    #'exchange.delete_ok'{} = amqp_channel:call(Channel, ExchangeDelete);
 
 delete_exchange(Channel, X) ->
     ExchangeDelete = #'exchange.delete'{exchange = X},
-    #'exchange.delete_ok'{} = amqp_channel:call(Channel, ExchangeDelete).
+    delete_exchange(Channel, ExchangeDelete).
+
 
 %%---------------------------------------------------------------------------
-%% TODO This whole section of optional properties and mandatory flags
-%% may have to be re-thought
+%% Queue
+
+declare_queue(Channel) ->
+    declare_queue(Channel, <<>>).
+
+declare_queue(Channel, QueueDeclare = #'queue.declare'{}) ->
+    #'queue.declare_ok'{queue = QueueName}
+        = amqp_channel:call(Channel, QueueDeclare),
+    QueueName;
+
+declare_queue(Channel, Q) ->
+    QueueDeclare = #'queue.declare'{queue = Q},
+    declare_queue(Channel, QueueDeclare).
+
+
+declare_private_queue(Channel) ->
+    declare_queue(Channel, #'queue.declare'{exclusive = true,
+                                            auto_delete = true}).
+
+declare_private_queue(Channel, QueueName) ->
+    declare_queue(Channel, #'queue.declare'{queue = QueueName,
+                                            exclusive = true,
+                                            auto_delete = true}).
+
+
+delete_queue(Channel, QueueDelete = #'queue.delete'{}) ->
+    #'queue.delete_ok'{} = amqp_channel:call(Channel, QueueDelete);
+
+delete_queue(Channel, Q) ->
+    QueueDelete = #'queue.delete'{queue = Q},
+    delete_queue(Channel, QueueDelete).
+
+
+bind_queue(Channel, X, Q, Binding) ->
+    QueueBind = #'queue.bind'{queue = Q, exchange = X,
+                              routing_key = Binding},
+    bind_queue(Channel, QueueBind).
+
+bind_queue(Channel, QueueBind = #'queue.bind'{}) ->
+    #'queue.bind_ok'{} = amqp_channel:call(Channel, QueueBind).
+
+
+unbind_queue(Channel, X, Q, Binding) ->
+    QueueUnbind = #'queue.unbind'{queue = Q, exchange = X,
+                             routing_key = Binding, arguments = []},
+    unbind_queue(Channel, QueueUnbind).
+
+unbind_queue(Channel, QueueUnbind = #'queue.unbind'{}) ->
+    #'queue.unbind_ok'{} = amqp_channel:call(Channel, QueueUnbind).
+
+
+%%---------------------------------------------------------------------------
+%% Publish
+
+% TODO This whole section of optional properties and mandatory flags may have
+% to be re-thought
+
+publish(Channel, BasicPublish = #'basic.publish'{}, Content = #content{}) ->
+    publish_internal(fun amqp_channel:call/3, Channel, BasicPublish, Content).
+
 publish(Channel, X, RoutingKey, Payload) ->
     publish(Channel, X, RoutingKey, Payload, false).
 
@@ -82,12 +183,20 @@ publish(Channel, X, RoutingKey, Payload, Mandatory, Properties) ->
     publish_internal(fun amqp_channel:call/3,
                      Channel, X, RoutingKey, Payload, Mandatory, Properties).
 
+async_publish(Channel, BasicPublish = #'basic.publish'{},
+              Content = #content{}) ->
+    publish_internal(fun amqp_channel:cast/3, Channel, BasicPublish, Content).
+
 async_publish(Channel, X, RoutingKey, Payload) ->
     async_publish(Channel, X, RoutingKey, Payload, false).
 
 async_publish(Channel, X, RoutingKey, Payload, Mandatory) ->
     publish_internal(fun amqp_channel:cast/3, Channel, X, RoutingKey,
                       Payload, Mandatory, amqp_util:basic_properties()).
+
+publish_internal(Fun, Channel, BasicPublish = #'basic.publish'{},
+                 Content=#content{}) ->
+    Fun(Channel, BasicPublish, Content).
 
 publish_internal(Fun, Channel, X, RoutingKey,
                  Payload, Mandatory, Properties) ->
@@ -99,36 +208,13 @@ publish_internal(Fun, Channel, X, RoutingKey,
                        properties = Properties,
                        properties_bin = none,
                        payload_fragments_rev = [Payload]},
-    Fun(Channel, BasicPublish, Content).
+    publish_internal(Fun, Channel, BasicPublish, Content).
+
 
 %%---------------------------------------------------------------------------
+%% Get, subscribe, ack
 
-close_channel(Channel) ->
-    ChannelClose = #'channel.close'{reply_code = 200,
-                                    reply_text = <<"Goodbye">>,
-                                    class_id = 0,
-                                    method_id = 0},
-    #'channel.close_ok'{} = amqp_channel:call(Channel, ChannelClose),
-    ok.
-
-close_connection(Connection) ->
-    ConnectionClose = #'connection.close'{reply_code = 200,
-                                          reply_text = <<"Goodbye">>,
-                                          class_id = 0,
-                                          method_id = 0},
-    #'connection.close_ok'{} = amqp_connection:close(Connection,
-                                                     ConnectionClose),
-    ok.
-
-teardown(Connection, Channel) ->
-    close_channel(Channel),
-    close_connection(Connection).
-
-
-get(Channel, Q) -> get(Channel, Q, true).
-
-get(Channel, Q, NoAck) ->
-    BasicGet = #'basic.get'{queue = Q, no_ack = NoAck},
+get(Channel, BasicGet = #'basic.get'{no_ack = NoAck}) ->
     {Method, Content} = amqp_channel:call(Channel, BasicGet),
     case Method of
         'basic.get_empty' -> 'basic.get_empty';
@@ -138,11 +224,20 @@ get(Channel, Q, NoAck) ->
                 true -> Content;
                 false -> {DeliveryTag, Content}
             end
-    end.
+    end;
 
-ack(Channel, DeliveryTag) ->
-    BasicAck = #'basic.ack'{delivery_tag = DeliveryTag, multiple = false},
-    ok = amqp_channel:cast(Channel, BasicAck).
+get(Channel, Q) ->
+    get(Channel, Q, true).
+
+get(Channel, Q, NoAck) ->
+    BasicGet = #'basic.get'{queue = Q, no_ack = NoAck},
+    get(Channel, BasicGet).
+
+
+subscribe(Channel, Consumer, BasicConsume = #'basic.consume'{}) ->
+    #'basic.consume_ok'{consumer_tag = ConsumerTag} =
+        amqp_channel:subscribe(Channel, BasicConsume, Consumer),
+    ConsumerTag;
 
 subscribe(Channel, Q, Consumer) ->
     subscribe(Channel, Q, Consumer, <<>>, true).
@@ -157,65 +252,32 @@ subscribe(Channel, Q, Consumer, Tag, NoAck) ->
     BasicConsume = #'basic.consume'{queue = Q,
                                     consumer_tag = Tag,
                                     no_ack = NoAck},
-    #'basic.consume_ok'{consumer_tag = ConsumerTag} =
-        amqp_channel:subscribe(Channel, BasicConsume, Consumer),
-    ConsumerTag.
+    subscribe(Channel, Consumer, BasicConsume).
+
+
+unsubscribe(Channel, BasicCancel = #'basic.cancel'{}) ->
+    #'basic.cancel_ok'{} = amqp_channel:call(Channel, BasicCancel),
+    ok;
 
 unsubscribe(Channel, Tag) ->
     BasicCancel = #'basic.cancel'{consumer_tag = Tag},
-    #'basic.cancel_ok'{} = amqp_channel:call(Channel, BasicCancel),
-    ok.
+    unsubscribe(Channel, BasicCancel).
+
+
+ack(Channel, BasicAck = #'basic.ack'{}) ->
+    ok = amqp_channel:cast(Channel, BasicAck);
+
+ack(Channel, DeliveryTag) ->
+    BasicAck = #'basic.ack'{delivery_tag = DeliveryTag, multiple = false},
+    ack(Channel, BasicAck).
+
 
 %%---------------------------------------------------------------------------
-%% Convenience functions for manipulating queues
+%% QoS
 
-%% TODO This whole part of the API needs to be refactored to reflect current
-%% usage patterns in a sensible way using the defaults that are in the spec
-%% file
-declare_queue(Channel) ->
-    declare_queue(Channel, <<>>).
-
-declare_queue(Channel, QueueDeclare = #'queue.declare'{}) ->
-    #'queue.declare_ok'{queue = QueueName}
-        = amqp_channel:call(Channel, QueueDeclare),
-    QueueName;
-
-declare_queue(Channel, Q) ->
-    %% TODO Specifying these defaults is unecessary - this is already taken
-    %% care of in the spec file
-    QueueDeclare = #'queue.declare'{queue = Q},
-    declare_queue(Channel, QueueDeclare).
-
-%% Creates a queue that is exclusive and auto-delete
-declare_private_queue(Channel) ->
-    declare_queue(Channel, #'queue.declare'{exclusive = true,
-                                            auto_delete = true}).
-
-declare_private_queue(Channel, QueueName) ->
-    declare_queue(Channel, #'queue.declare'{queue = QueueName,
-                                            exclusive = true,
-                                            auto_delete = true}).
-
-%%---------------------------------------------------------------------------
-%% Basic.Qos
-
-%% Sets the prefetch count for messages delivered on this channel
 set_prefetch_count(Channel, Prefetch) ->
-    amqp_channel:call(Channel, #'basic.qos'{prefetch_count = Prefetch}).
+    BasicQos = #'basic.qos'{prefetch_count = Prefetch},
+    qos(Channel, BasicQos).
 
-%%---------------------------------------------------------------------------
-
-delete_queue(Channel, Q) ->
-    QueueDelete = #'queue.delete'{queue = Q},
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, QueueDelete).
-
-bind_queue(Channel, X, Q, Binding) ->
-    QueueBind = #'queue.bind'{queue = Q, exchange = X,
-                              routing_key = Binding},
-    #'queue.bind_ok'{} = amqp_channel:call(Channel, QueueBind).
-
-unbind_queue(Channel, X, Q, Binding) ->
-    Unbind = #'queue.unbind'{queue = Q, exchange = X,
-                             routing_key = Binding, arguments = []},
-    #'queue.unbind_ok'{} = amqp_channel:call(Channel, Unbind).
-
+qos(Channel, BasicQos = #'basic.qos'{}) ->
+    amqp_channel:call(Channel, BasicQos).
