@@ -85,6 +85,7 @@ dialyze_all: $(TARGETS) $(TEST_TARGETS)
 add_broker_to_plt: $(BROKER_SYMLINK)/ebin
 	$(DIALYZER_CALL) --add_to_plt -r $<
 
+
 $(TEST_TARGETS): $(TEST_DIR)
 
 .PHONY: $(TEST_DIR)
