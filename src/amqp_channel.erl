@@ -309,7 +309,10 @@ handle_method(CloseOk = #'channel.close_ok'{}, State) ->
 
 %% Handles the scenario when the broker intiates a channel.close
 handle_method(#'channel.close'{reply_code = ReplyCode,
-                               reply_text = ReplyText}, State) ->
+                               reply_text = ReplyText},
+              State = #channel_state{do2 = Do2,
+                                     writer_pid = Writer}) ->
+    Do2(Writer, #'channel.close_ok'{}),
     {stop, {server_initiated_close, ReplyCode, ReplyText}, State};
 
 %% This handles the flow control flag that the broker initiates.
