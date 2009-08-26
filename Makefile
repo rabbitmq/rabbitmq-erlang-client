@@ -23,208 +23,74 @@
 #   Contributor(s): Ben Hood <0x6e6562@gmail.com>.
 #
 
-EBIN_DIR=ebin
-export INCLUDE_DIR=include
-export INCLUDE_SERV_DIR=$(BROKER_DIR)/include
-TEST_DIR=test
-SOURCE_DIR=src
-DIST_DIR=dist
-
 DEPS=$(shell erl -noshell -eval '{ok,[{_,_,[_,_,{modules, Mods},_,_,_]}]} = \
                                  file:consult("rabbit_common.app"), \
                                  [io:format("~p ",[M]) || M <- Mods], halt().')
 
-PACKAGE=amqp_client
-PACKAGE_NAME=$(PACKAGE).ez
-COMMON_PACKAGE=rabbit_common
-COMMON_PACKAGE_NAME=$(COMMON_PACKAGE).ez
+VERSION=0.0.0
+SOURCE_PACKAGE_NAME=$(PACKAGE)-$(VERSION)-src
 
-INCLUDES=$(wildcard $(INCLUDE_DIR)/*.hrl)
-SOURCES=$(wildcard $(SOURCE_DIR)/*.erl)
-TARGETS=$(patsubst $(SOURCE_DIR)/%.erl, $(EBIN_DIR)/%.beam, $(SOURCES))
-TEST_SOURCES=$(wildcard $(TEST_DIR)/*.erl)
-TEST_TARGETS=$(patsubst $(TEST_DIR)/%.erl, $(TEST_DIR)/%.beam, $(TEST_SOURCES))
+.PHONY: common_package dist
 
-LOAD_PATH=$(EBIN_DIR) $(BROKER_DIR)/ebin $(TEST_DIR)
+include common.mk
 
-ifndef USE_SPECS
-# our type specs rely on features / bug fixes in dialyzer that are
-# only available in R12B-3 upwards
-#
-# NB: the test assumes that version number will only contain single digits
-export USE_SPECS=$(shell if [ $$(erl -noshell -eval 'io:format(erlang:system_info(version)), halt().') \> "5.6.2" ]; then echo "true"; else echo "false"; fi)
-endif
+clean: common_clean
+	rm -fr $(DIST_DIR)
+	rm -fr $(DEPS_DIR)
 
-ERLC_OPTS=-I $(INCLUDE_DIR) -I $(INCLUDE_SERV_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(shell [ $(USE_SPECS) = "true" ] && echo "-Duse_specs")
+dist: doc source_tarball package
 
-export BROKER_DIR=../rabbitmq-server
-RABBITMQ_NODENAME=rabbit
-BROKER_START_ARGS=-pa $(realpath $(LOAD_PATH))
-MAKE_BROKER=$(MAKE) RABBITMQ_SERVER_START_ARGS='$(BROKER_START_ARGS)' -C $(BROKER_DIR)
-ERL_CALL_BROKER=erl_call -sname $(RABBITMQ_NODENAME) -e
+##############################################################################
+##  Testing
+###############################################################################
 
-PLT=$(HOME)/.dialyzer_plt
-DIALYZER_CALL=dialyzer --plt $(PLT)
+include test.mk
 
+test_common_package: common_package package prepare_tests
+	$(MAKE) start_test_broker_node
+	OK=true && \
+	TMPFILE=$(MKTEMP) && \
+	    { $(LIBS_PATH) erl -noshell -pa $(TEST_DIR) \
+	    -eval 'network_client_SUITE:test(), halt().' 2>&1 | \
+		tee $$TMPFILE || OK=false; } && \
+	{ egrep "All .+ tests (successful|passed)." $$TMPFILE || OK=false; } && \
+	rm $$TMPFILE && \
+	$(MAKE) stop_test_broker_node && \
+	$$OK
 
-all: compile
+###############################################################################
+##  Packaging
+###############################################################################
 
-compile: $(TARGETS)
+COPY=cp -pR
 
-compile_tests: $(TEST_DIR)
+common_package: $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 
-
-$(TEST_TARGETS): $(TEST_DIR)
-
-.PHONY: $(TEST_DIR)
-$(TEST_DIR): $(BROKER_DIR)
-	$(MAKE) -C $(TEST_DIR)
-
-$(EBIN_DIR)/%.beam: $(SOURCE_DIR)/%.erl $(INCLUDES) $(BROKER_DIR)
-	mkdir -p $(EBIN_DIR); erlc $(ERLC_OPTS) $<
-
-$(BROKER_DIR):
-	test -e $(BROKER_DIR)
-
-
-run: compile
-	erl -pa $(LOAD_PATH)
-
-run_in_broker: $(BROKER_DIR) compile
-	$(MAKE_BROKER) run
-
-
-dialyze: $(TARGETS)
-	$(DIALYZER_CALL) -c $^
-
-dialyze_all: $(TARGETS) $(TEST_TARGETS)
-	$(DIALYZER_CALL) -c $^
-
-add_broker_to_plt: $(BROKER_DIR)/ebin
-	$(DIALYZER_CALL) --add_to_plt -r $<
-
-
-.PHONY: start_background_node_in_broker
-start_background_node_in_broker: $(BROKER_DIR) compile
-	$(MAKE_BROKER) start-background-node
-	$(MAKE_BROKER) start-rabbit-on-node
-
-.PHONY: stop_background_node_in_broker
-stop_background_node_in_broker: $(BROKER_DIR)
-	$(MAKE_BROKER) stop-rabbit-on-node
-	$(MAKE_BROKER) stop-node
-
-.PHONY: start_cover_on_node
-start_cover_on_node: $(BROKER_DIR)
-	$(MAKE_BROKER) start-cover
-
-.PHONY: stop_cover_on_node
-stop_cover_on_node: $(BROKER_DIR)
-	$(MAKE_BROKER) stop-cover
-
-.PHONY: test_network_on_node
-test_network_on_node:
-	echo 'network_client_SUITE:test().' | $(ERL_CALL_BROKER) | egrep '^\{ok, ok\}$$' || touch .test_error
-
-.PHONY: test_direct_on_node
-test_direct_on_node:
-	echo 'direct_client_SUITE:test().' | $(ERL_CALL_BROKER) | egrep '^\{ok, ok\}$$' || touch .test_error
-
-.PHONY: clean_test_error
-clean_test_error:
-	rm -f .test_error
-
-all_tests: compile compile_tests \
-           start_background_node_in_broker \
-           clean_test_error \
-           test_direct_on_node \
-           test_network_on_node \
-           stop_background_node_in_broker
-	test ! -e .test_error
-
-test_network: compile compile_tests \
-              start_background_node_in_broker \
-              clean_test_error \
-              test_network_on_node \
-              stop_background_node_in_broker
-	test ! -e .test_error
-
-test_direct: compile compile_tests \
-              start_background_node_in_broker \
-              clean_test_error \
-              test_direct_on_node \
-              stop_background_node_in_broker
-	test ! -e .test_error
-
-all_tests_coverage: compile compile_tests \
-           start_background_node_in_broker \
-           clean_test_error \
-           start_cover_on_node \
-           test_direct_on_node \
-           test_network_on_node \
-           stop_cover_on_node \
-           stop_background_node_in_broker
-	test ! -e .test_error
-
-test_network_coverage: compile compile_tests \
-           start_background_node_in_broker \
-           clean_test_error \
-           start_cover_on_node \
-           test_network_on_node \
-           stop_cover_on_node \
-           stop_background_node_in_broker
-	test ! -e .test_error
-
-test_direct_coverage: compile compile_tests \
-           start_background_node_in_broker \
-           clean_test_error \
-           start_cover_on_node \
-           test_direct_on_node \
-           stop_cover_on_node \
-           stop_background_node_in_broker
-	test ! -e .test_error
-
-
-clean:
-	rm -f $(EBIN_DIR)/*.beam
-	rm -f erl_crash.dump
-	rm -f .test_error
-	rm -fr dist tmp
-	$(MAKE) -C $(TEST_DIR) clean
-
-$(DIST_DIR):
-	mkdir -p $@
-
-source_tarball: $(DIST_DIR)
-	cp -a README Makefile dist/$(DIST_DIR)/
-	mkdir -p dist/$(DIST_DIR)/$(SOURCE_DIR)
-	cp -a $(SOURCE_DIR)/*.erl dist/$(DIST_DIR)/$(SOURCE_DIR)/
-	mkdir -p dist/$(DIST_DIR)/$(INCLUDE_DIR)
-	cp -a $(INCLUDE_DIR)/*.hrl dist/$(DIST_DIR)/$(INCLUDE_DIR)/
-	mkdir -p dist/$(DIST_DIR)/$(TEST_DIR)
-	cp -a $(TEST_DIR)/*.erl dist/$(DIST_DIR)/$(TEST_DIR)/
-	cp -a $(TEST_DIR)/Makefile dist/$(DIST_DIR)/$(TEST_DIR)/
-	cd dist ; tar cvzf $(DIST_DIR).tar.gz $(DIST_DIR)
-
-package: clean $(DIST_DIR) $(TARGETS)
-	mkdir -p $(DIST_DIR)/$(PACKAGE)
-	cp -r $(EBIN_DIR) $(DIST_DIR)/$(PACKAGE)
-	cp -r $(INCLUDE_DIR) $(DIST_DIR)/$(PACKAGE)
-	(cd $(DIST_DIR); zip -r $(PACKAGE_NAME) $(PACKAGE))
-
-
-common_package: $(BROKER_SYMLINK)
-	$(MAKE) -C $(BROKER_SYMLINK)
-	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE)/$(EBIN_DIR)
-	cp $(COMMON_PACKAGE).app $(DIST_DIR)/$(COMMON_PACKAGE)/$(EBIN_DIR)
+$(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS)
+	$(MAKE) -C $(BROKER_DIR)
+	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(INCLUDE_DIR)
+	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(EBIN_DIR)
+	cp $(COMMON_PACKAGE).app $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(EBIN_DIR)
 	$(foreach DEP, $(DEPS), \
-        ( cp $(BROKER_SYMLINK)/$(EBIN_DIR)/$(DEP).beam \
-          $(DIST_DIR)/$(COMMON_PACKAGE)/$(EBIN_DIR) \
+        ( cp $(BROKER_DIR)/$(EBIN_DIR)/$(DEP).beam \
+          $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(EBIN_DIR) \
         );)
-	(cd $(DIST_DIR); zip -r $(COMMON_PACKAGE_NAME) $(COMMON_PACKAGE))
+	cp $(BROKER_DIR)/$(INCLUDE_DIR)/*.hrl $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(INCLUDE_DIR)
+	(cd $(DIST_DIR); zip -r $(COMMON_PACKAGE_NAME) $(COMMON_PACKAGE_VSN))
 
-test_common_package: package common_package $(TEST_TARGETS)
-	@echo This target requires that you are already running an instance \
-        of the broker on the localhost.......
-	ERL_LIBS=$(DIST_DIR) erl -pa test -eval 'network_client_SUITE:test(),halt().'
-
+source_tarball: $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
+	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(DIST_DIR)
+	$(COPY) $(DIST_DIR)/$(COMMON_PACKAGE_NAME) $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(DIST_DIR)/
+	$(COPY) README $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/
+	$(COPY) common.mk $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/
+	sed 's/%%VSN%%/$(VERSION)/' Makefile.in > $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/Makefile
+	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(SOURCE_DIR)
+	$(COPY) $(SOURCE_DIR)/*.erl $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(SOURCE_DIR)/
+	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(EBIN_DIR)
+	$(COPY) $(EBIN_DIR)/*.app $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(EBIN_DIR)/
+	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(INCLUDE_DIR)
+	$(COPY) $(INCLUDE_DIR)/*.hrl $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(INCLUDE_DIR)/
+	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(TEST_DIR)
+	$(COPY) $(TEST_DIR)/*.erl $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(TEST_DIR)/
+	$(COPY) $(TEST_DIR)/Makefile $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(TEST_DIR)/
+	cd $(DIST_DIR) ; tar cvzf $(SOURCE_PACKAGE_NAME).tar.gz $(SOURCE_PACKAGE_NAME)

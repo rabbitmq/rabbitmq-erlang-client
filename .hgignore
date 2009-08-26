@@ -1,6 +1,6 @@
 \.beam$
 ^tmp/
 ^dist/
-^\.test_error$
+^deps/
 ^erl_crash.dump$
-
+^doc/

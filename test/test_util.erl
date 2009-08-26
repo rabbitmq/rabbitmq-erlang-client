@@ -25,8 +25,6 @@
 
 -module(test_util).
 
--include_lib("rabbit.hrl").
--include_lib("rabbit_framing.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -include("amqp_client.hrl").
 
@@ -48,7 +46,7 @@
 %%
 %% This is an example of how the client interaction should work
 %%
-%%   Connection = amqp_connection:start(User, Password, Host),
+%%   Connection = amqp_connection:start(#amqp_params{}),
 %%   Channel = amqp_connection:open_channel(Connection),
 %%   %%...do something useful
 %%   ChannelClose = #'channel.close'{ %% set the appropriate fields },
@@ -59,17 +57,29 @@
 
 lifecycle_test(Connection) ->
     X = <<"x">>,
-    Channel = lib_amqp:start_channel(Connection),
-    lib_amqp:declare_exchange(Channel, X, <<"topic">>),
+    Channel = amqp_connection:open_channel(Connection),
+    amqp_channel:call(Channel,
+                      #'exchange.declare'{exchange = X,
+                                          type = <<"topic">>}),
     Parent = self(),
     [spawn(
            fun() ->
                 queue_exchange_binding(Channel, X, Parent, Tag) end)
             || Tag <- lists:seq(1, ?Latch)],
     latch_loop(?Latch),
-    lib_amqp:delete_exchange(Channel, X),
-    lib_amqp:teardown(Connection, Channel),
+    amqp_channel:call(Channel, #'exchange.delete'{exchange = X}),
+    teardown(Connection, Channel),
     ok.
+
+nowait_exchange_declare_test(Connection) ->
+    X = <<"x">>,
+    Channel = amqp_connection:open_channel(Connection),
+    ?assertEqual(
+      ok,
+      amqp_channel:call(Channel,
+                        #'exchange.declare'{exchange = X,
+                                            type = <<"topic">>,
+                                            nowait = true })).
 
 queue_exchange_binding(Channel, X, Parent, Tag) ->
     receive
@@ -79,105 +89,124 @@ queue_exchange_binding(Channel, X, Parent, Tag) ->
     end,
     Q = <<"a.b.c", Tag:32>>,
     Binding = <<"a.b.c.*">>,
-    Q1 = lib_amqp:declare_queue(Channel, Q),
+    #'queue.declare_ok'{queue = Q1}
+        = amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
     ?assertMatch(Q, Q1),
-    lib_amqp:bind_queue(Channel, X, Q, Binding),
-    lib_amqp:delete_queue(Channel, Q),
+    Route = #'queue.bind'{queue = Q,
+                          exchange = X,
+                          routing_key = Binding},
+    amqp_channel:call(Channel, Route),
+    amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
     Parent ! finished.
 
 channel_lifecycle_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
-    lib_amqp:close_channel(Channel),
-    Channel2 = lib_amqp:start_channel(Connection),
-    lib_amqp:teardown(Connection, Channel2),
+    Channel = amqp_connection:open_channel(Connection),
+    amqp_channel:close(Channel),
+    Channel2 = amqp_connection:open_channel(Connection),
+    teardown(Connection, Channel2),
     ok.
 
 %% This is designed to exercize the internal queuing mechanism
 %% to ensure that commands are properly serialized
 command_serialization_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     Parent = self(),
     [spawn(fun() ->
                 Q = uuid(),
-                Q1 = lib_amqp:declare_queue(Channel, Q),
+                #'queue.declare_ok'{queue = Q1}
+                    = amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
                 ?assertMatch(Q, Q1),
                 Parent ! finished
            end) || _ <- lists:seq(1, ?Latch)],
     latch_loop(?Latch),
-    lib_amqp:teardown(Connection, Channel).
+    teardown(Connection, Channel).
 
 queue_unbind_test(Connection) ->
     X = <<"eggs">>, Q = <<"foobar">>, Key = <<"quay">>,
     Payload = <<"foobar">>,
-    Channel = lib_amqp:start_channel(Connection),
-    lib_amqp:declare_exchange(Channel, X),
-    lib_amqp:declare_queue(Channel, Q),
-    lib_amqp:bind_queue(Channel, X, Q, Key),
-    lib_amqp:publish(Channel, X, Key, Payload),
+    Channel = amqp_connection:open_channel(Connection),
+    amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
+    amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
+    Bind = #'queue.bind'{queue = Q,
+                         exchange = X,
+                         routing_key = Key},
+    amqp_channel:call(Channel, Bind),
+    Publish = #'basic.publish'{exchange = X, routing_key = Key},
+    amqp_channel:call(Channel, Publish, Msg = #amqp_msg{payload = Payload}),
     get_and_assert_equals(Channel, Q, Payload),
-    lib_amqp:unbind_queue(Channel, X, Q, Key),
-    lib_amqp:publish(Channel, X, Key, Payload),
+    Unbind = #'queue.unbind'{queue = Q,
+                             exchange = X,
+                             routing_key = Key},
+    amqp_channel:call(Channel, Unbind),
+    amqp_channel:call(Channel, Publish, Msg),
     get_and_assert_empty(Channel, Q),
-    lib_amqp:teardown(Connection, Channel).
+    teardown(Connection, Channel).
 
 get_and_assert_empty(Channel, Q) ->
-    BasicGetEmpty = lib_amqp:get(Channel, Q, false),
-    ?assertMatch('basic.get_empty', BasicGetEmpty).
+    #'basic.get_empty'{}
+        = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = true}).
 
 get_and_assert_equals(Channel, Q, Payload) ->
-    Content = lib_amqp:get(Channel, Q),
-    #content{payload_fragments_rev = PayloadFragments} = Content,
-    ?assertMatch([Payload], PayloadFragments).
+    {#'basic.get_ok'{}, Content}
+        = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = true}),
+    #amqp_msg{payload = Payload2} = Content,
+    ?assertMatch(Payload, Payload2).
 
 basic_get_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     {ok, Q} = setup_publish(Channel),
-    %% TODO: This could be refactored to use get_and_assert_equals,
-    %% get_and_assert_empty .... would require another bug though :-)
-    Content = lib_amqp:get(Channel, Q),
-    #content{payload_fragments_rev = PayloadFragments} = Content,
-    ?assertMatch([<<"foobar">>], PayloadFragments),
-    BasicGetEmpty = lib_amqp:get(Channel, Q, false),
-    ?assertMatch('basic.get_empty', BasicGetEmpty),
-    lib_amqp:teardown(Connection, Channel).
+    get_and_assert_equals(Channel, Q, <<"foobar">>),
+    get_and_assert_empty(Channel, Q),
+    teardown(Connection, Channel).
 
 basic_return_test(Connection) ->
     X = uuid(),
     Q = uuid(),
     Key = uuid(),
     Payload = <<"qwerty">>,
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     amqp_channel:register_return_handler(Channel, self()),
-    lib_amqp:declare_exchange(Channel, X),
-    lib_amqp:declare_queue(Channel, Q),
-    lib_amqp:publish(Channel, X, Key, Payload, true),
+    amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
+    amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
+    Publish = #'basic.publish'{exchange = X, routing_key = Key, 
+                               mandatory = true},
+    amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
     timer:sleep(200),
     receive
         {BasicReturn = #'basic.return'{}, Content} ->
             #'basic.return'{reply_text = ReplyText,
                             exchange = X} = BasicReturn,
             ?assertMatch(<<"unroutable">>, ReplyText),
-            #content{payload_fragments_rev = Payload2} = Content,
-            ?assertMatch([Payload], Payload2);
+            #amqp_msg{payload = Payload2} = Content,
+            ?assertMatch(Payload, Payload2);
         WhatsThis ->
             %% TODO investigate where this comes from
-            io:format("Spurious message ~p~n", [WhatsThis])
+            ?LOG_INFO("Spurious message ~p~n", [WhatsThis])
     after 2000 ->
         exit(no_return_received)
     end,
-    lib_amqp:teardown(Connection, Channel).
+    teardown(Connection, Channel).
 
 basic_ack_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     {ok, Q} = setup_publish(Channel),
-    {DeliveryTag, _} = lib_amqp:get(Channel, Q, false),
-    lib_amqp:ack(Channel, DeliveryTag),
-    lib_amqp:teardown(Connection, Channel).
+    {#'basic.get_ok'{delivery_tag = Tag}, _} 
+        = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = false}),
+    amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
+    teardown(Connection, Channel).
+
+basic_ack_call_test(Connection) ->
+    Channel = amqp_connection:open_channel(Connection),
+    {ok, Q} = setup_publish(Channel),
+    {#'basic.get_ok'{delivery_tag = Tag}, _}
+        = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = false}),
+    amqp_channel:call(Channel, #'basic.ack'{delivery_tag = Tag}),
+    teardown(Connection, Channel).
 
 basic_consume_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     X = uuid(),
-    lib_amqp:declare_exchange(Channel, X),
+    amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
     RoutingKey = uuid(),
     Parent = self(),
     [spawn(
@@ -185,37 +214,47 @@ basic_consume_test(Connection) ->
             consume_loop(Channel, X, RoutingKey, Parent, <<Tag:32>>) end)
         || Tag <- lists:seq(1, ?Latch)],
     timer:sleep(?Latch * 20),
-    lib_amqp:publish(Channel, X, RoutingKey, <<"foobar">>),
+    Publish = #'basic.publish'{exchange = X, routing_key = RoutingKey},
+    amqp_channel:call(Channel, Publish, #amqp_msg{payload = <<"foobar">>}),
     latch_loop(?Latch),
-    lib_amqp:teardown(Connection, Channel).
+    teardown(Connection, Channel).
 
 consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
-    Q = lib_amqp:declare_queue(Channel),
-    lib_amqp:bind_queue(Channel, X, Q, RoutingKey),
-    lib_amqp:subscribe(Channel, Q, self(), Tag),
+    #'queue.declare_ok'{queue = Q}
+        = amqp_channel:call(Channel, #'queue.declare'{}),
+    Route = #'queue.bind'{queue = Q,
+                          exchange = X,
+                          routing_key = RoutingKey},
+    amqp_channel:call(Channel, Route),
+    amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q,
+                                                     consumer_tag = Tag},
+                           self()),
     receive
         #'basic.consume_ok'{consumer_tag = Tag} -> ok
     end,
     receive
         {#'basic.deliver'{}, _} -> ok
     end,
-    lib_amqp:unsubscribe(Channel, Tag),
+    amqp_channel:call(Channel, #'basic.cancel'{consumer_tag = Tag}),
     receive
         #'basic.cancel_ok'{consumer_tag = Tag} -> ok
     end,
     Parent ! finished.
 
 basic_recover_test(Connection) ->
-    Q = uuid(),
-    Channel = lib_amqp:start_channel(Connection),
-    lib_amqp:declare_queue(Channel, Q),
-    Tag = lib_amqp:subscribe(Channel, Q, self(), false),
+    Channel = amqp_connection:open_channel(Connection),
+    #'queue.declare_ok'{queue = Q}
+        = amqp_channel:call(Channel, #'queue.declare'{}),
+    #'basic.consume_ok'{consumer_tag = Tag} 
+        = amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q},
+                                 self()),
     receive
         #'basic.consume_ok'{consumer_tag = Tag} -> ok
     after 2000 ->
         exit(did_not_receive_subscription_message)
     end,
-    lib_amqp:publish(Channel, <<>>, Q, <<"foobar">>),
+    Publish = #'basic.publish'{exchange = <<>>, routing_key = Q},
+    amqp_channel:call(Channel, Publish, #amqp_msg{payload = <<"foobar">>}),
     receive
         {#'basic.deliver'{}, _} ->
             %% no_ack set to false, but don't send ack
@@ -227,11 +266,12 @@ basic_recover_test(Connection) ->
     amqp_channel:cast(Channel, BasicRecover),
     receive
         {#'basic.deliver'{delivery_tag = DeliveryTag2}, _} ->
-            lib_amqp:ack(Channel, DeliveryTag2)
+            amqp_channel:cast(Channel,
+                              #'basic.ack'{delivery_tag = DeliveryTag2})
     after 2000 ->
         exit(did_not_receive_second_message)
     end,
-    lib_amqp:teardown(Connection, Channel).
+    teardown(Connection, Channel).
 
 basic_qos_test(Con) ->
     [NoQos, Qos] = [basic_qos_test(Con, Prefetch) || Prefetch <- [0,1]],
@@ -243,22 +283,27 @@ basic_qos_test(Connection, Prefetch) ->
     Messages = 100,
     Workers = [5, 50],
     Parent = self(),
-    Chan = lib_amqp:start_channel(Connection),
-    Q = lib_amqp:declare_queue(Chan),
-    Kids = [spawn(fun() ->
-                    Channel = lib_amqp:start_channel(Connection),
-                    lib_amqp:set_prefetch_count(Channel, Prefetch),
-                    lib_amqp:subscribe(Channel, Q, self(), false),
-                    Parent ! finished,
-                    sleeping_consumer(Channel, Sleep, Parent)
-                  end) || Sleep <- Workers],
+    Chan = amqp_connection:open_channel(Connection),
+    #'queue.declare_ok'{queue = Q}
+        = amqp_channel:call(Chan, #'queue.declare'{}),
+    Kids = [spawn(
+            fun() ->
+                Channel = amqp_connection:open_channel(Connection),
+                amqp_channel:call(Channel,
+                                 #'basic.qos'{prefetch_count = Prefetch}),
+                amqp_channel:subscribe(Channel,
+                                       #'basic.consume'{queue = Q},
+                                       self()),
+                Parent ! finished,
+                sleeping_consumer(Channel, Sleep, Parent)
+            end) || Sleep <- Workers],
     latch_loop(length(Kids)),
-    spawn(fun() -> producer_loop(lib_amqp:start_channel(Connection),
+    spawn(fun() -> producer_loop(amqp_connection:open_channel(Connection),
                                  Q, Messages) end),
     {Res, ok} = timer:tc(erlang, apply, [fun latch_loop/1, [Messages]]),
     [Kid ! stop || Kid <- Kids],
     latch_loop(length(Kids)),
-    lib_amqp:close_channel(Chan),
+    amqp_channel:close(Chan),
     Res.
 
 sleeping_consumer(Channel, Sleep, Parent) ->
@@ -274,26 +319,93 @@ sleeping_consumer(Channel, Sleep, Parent) ->
             receive stop -> do_stop(Channel, Parent)
             after Sleep -> ok
             end,
-            lib_amqp:ack(Channel, DeliveryTag),
+            amqp_channel:cast(Channel,
+                              #'basic.ack'{delivery_tag = DeliveryTag}),
             sleeping_consumer(Channel, Sleep, Parent)
     end.
 
 do_stop(Channel, Parent) ->
     Parent ! finished,
-    lib_amqp:close_channel(Channel),
+    amqp_channel:close(Channel),
     exit(normal).
 
 producer_loop(Channel, _RoutingKey, 0) ->
-    lib_amqp:close_channel(Channel),
+    amqp_channel:close(Channel),
     ok;
 
 producer_loop(Channel, RoutingKey, N) ->
-    lib_amqp:publish(Channel, <<>>, RoutingKey, <<>>),
+    Publish = #'basic.publish'{exchange = <<>>, routing_key = RoutingKey},
+    amqp_channel:call(Channel, Publish, #amqp_msg{payload = <<>>}),
     producer_loop(Channel, RoutingKey, N - 1).
 
 %% Reject is not yet implemented in RabbitMQ
 basic_reject_test(Connection) ->
-    lib_amqp:close_connection(Connection).
+    amqp_connection:close(Connection).
+
+large_content_test(Connection) ->
+    Channel = amqp_connection:open_channel(Connection),
+    #'queue.declare_ok'{queue = Q}
+        = amqp_channel:call(Channel, #'queue.declare'{}),
+    {A1,A2,A3} = now(), random:seed(A1, A2, A3),
+    F = list_to_binary([random:uniform(256)-1 || _ <- lists:seq(1, 1000)]),
+    Payload = list_to_binary([[F || _ <- lists:seq(1, 1000)]]),
+    Publish = #'basic.publish'{exchange = <<>>, routing_key = Q},
+    amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
+    get_and_assert_equals(Channel, Q, Payload),
+    teardown(Connection, Channel).
+
+%% ----------------------------------------------------------------------------
+%% Test for the network client
+%% Sends a bunch of messages and immediatly closes the connection without
+%% closing the channel. Then gets the messages back from the queue and expects
+%% all of them to have been sent.
+pub_and_close_test(Connection1, Connection2) ->
+    X = uuid(), Q = uuid(), Key = uuid(),
+    Payload = <<"eggs">>, NMessages = 50000,
+    Channel1 = amqp_connection:open_channel(Connection1),
+    amqp_channel:call(Channel1, #'exchange.declare'{exchange = X}),
+    amqp_channel:call(Channel1, #'queue.declare'{queue = Q}),
+    Route = #'queue.bind'{queue = Q,
+                          exchange = X,
+                          routing_key = Key},
+    amqp_channel:call(Channel1, Route),
+    %% Send messages
+    pc_producer_loop(Channel1, X, Key, Payload, NMessages),
+    %% Close connection without closing channels
+    amqp_connection:close(Connection1),
+    %% Get sent messages back and count them
+    Channel2 = amqp_connection:open_channel(Connection2),
+    amqp_channel:subscribe(Channel2, 
+                           #'basic.consume'{queue = Q, no_ack = true}, 
+                           self()),
+    ?assert(pc_consumer_loop(Channel2, Payload, 0) == NMessages),
+    %% Make sure queue is empty
+    #'queue.declare_ok'{queue = Q, message_count = NRemaining} =
+        amqp_channel:call(Channel2, #'queue.declare'{queue = Q}),
+    ?assert(NRemaining == 0),
+    teardown(Connection2, Channel2),
+    ok.
+
+pc_producer_loop(_, _, _, _, 0) -> ok;
+pc_producer_loop(Channel, X, Key, Payload, NRemaining) ->
+    Publish = #'basic.publish'{exchange = X, routing_key = Key},
+    ok = amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
+    pc_producer_loop(Channel, X, Key, Payload, NRemaining - 1).
+
+pc_consumer_loop(Channel, Payload, NReceived) ->
+    receive
+        {#'basic.deliver'{},
+         #amqp_msg{payload = DeliveredPayload}} ->
+            case DeliveredPayload of
+                Payload ->
+                    pc_consumer_loop(Channel, Payload, NReceived + 1);
+                _ ->
+                    exit(received_unexpected_content)
+            end
+    after 1000 ->
+        NReceived
+    end.
+
 
 %%----------------------------------------------------------------------------
 %% Unit test for the direct client
@@ -314,14 +426,18 @@ channel_flow_test(Connection) ->
     K = Payload = <<"x">>,
     memsup:set_sysmem_high_watermark(0.99),
     timer:sleep(1000),
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     Parent = self(),
     Child = spawn_link(
               fun() ->
                       receive
                           #'channel.flow'{active = false} -> ok
                       end,
-                      blocked = lib_amqp:publish(Channel, X, K, Payload),
+                      Publish = #'basic.publish'{exchange = X,
+                                                 routing_key = K},
+                      blocked = 
+                        amqp_channel:call(Channel, Publish,
+                                          #amqp_msg{payload = Payload}),
                       memsup:set_sysmem_high_watermark(0.99),
                       receive
                           #'channel.flow'{active = true} -> ok
@@ -334,7 +450,7 @@ channel_flow_test(Connection) ->
     receive
         ok -> ok
     after 10000 ->
-        io:format("Are you sure that you have waited 1 minute?~n"),
+        ?LOG_DEBUG("Are you sure that you have waited 1 minute?~n"),
         exit(did_not_receive_channel_flow)
     end.
 
@@ -343,17 +459,17 @@ channel_flow_test(Connection) ->
 %% handles the effect of being throttled.
 
 channel_flow_sync(Connection) ->
-    start_channel_flow(Connection, fun lib_amqp:publish/4).
+    start_channel_flow(Connection, fun amqp_channel:call/3).
 
 channel_flow_async(Connection) ->
-    start_channel_flow(Connection, fun lib_amqp:async_publish/4).
+    start_channel_flow(Connection, fun amqp_channel:cast/3).
 
 start_channel_flow(Connection, PublishFun) ->
     X = <<"amq.direct">>,
     Key = uuid(),
     Producer = spawn_link(
         fun() ->
-            Channel = lib_amqp:start_channel(Connection),
+            Channel = amqp_connection:open_channel(Connection),
             Parent = self(),
             FlowHandler = spawn_link(fun() -> cf_handler_loop(Parent) end),
             amqp_channel:register_flow_handler(Channel, FlowHandler),
@@ -362,10 +478,17 @@ start_channel_flow(Connection, PublishFun) ->
         end),
     Consumer = spawn_link(
         fun() ->
-            Channel = lib_amqp:start_channel(Connection),
-            Q = lib_amqp:declare_queue(Channel),
-            lib_amqp:bind_queue(Channel, X, Q, Key),
-            Tag = lib_amqp:subscribe(Channel, Q, self()),
+            Channel = amqp_connection:open_channel(Connection),
+            #'queue.declare_ok'{queue = Q}
+                = amqp_channel:call(Channel, #'queue.declare'{}),
+            Bind = #'queue.bind'{queue = Q,
+                                 exchange = X,
+                                 routing_key = Key},
+            amqp_channel:call(Channel, Bind),
+            #'basic.consume_ok'{consumer_tag = Tag} 
+                = amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q},
+                                         self()),
+            
             cf_consumer_loop(Channel, Tag)
         end),
     {Producer, Consumer}.
@@ -375,27 +498,29 @@ cf_consumer_loop(Channel, Tag) ->
         #'basic.consume_ok'{} -> cf_consumer_loop(Channel, Tag);
         #'basic.cancel_ok'{} -> ok;
         {#'basic.deliver'{delivery_tag = DeliveryTag}, _Content} ->
-             lib_amqp:ack(Channel, DeliveryTag),
-             cf_consumer_loop(Channel, Tag);
+            amqp_channel:call(Channel,
+                #'basic.ack'{delivery_tag = DeliveryTag}),
+            cf_consumer_loop(Channel, Tag);
         stop ->
-             lib_amqp:unsubscribe(Channel, Tag),
-             ok
+            amqp_channel:call(Channel, #'basic.cancel'{consumer_tag = Tag}),
+            ok
     end.
 
 cf_producer_loop(Channel, X, Key, PublishFun, Payload, N)
         when N rem 5000 =:= 0 ->
-    io:format("Producer (~p) has sent about ~p messages since it started~n",
+    ?LOG_INFO("Producer (~p) has sent about ~p messages since it started~n",
               [self(), N]),
     cf_producer_loop(Channel, X, Key, PublishFun, Payload, N + 1);
 
 cf_producer_loop(Channel, X, Key, PublishFun, Payload, N) ->
-    case PublishFun(Channel, X, Key, Payload) of
+    Publish = #'basic.publish'{exchange = X, routing_key = Key},
+    case PublishFun(Channel, Publish, #amqp_msg{payload = Payload}) of
         blocked ->
-            io:format("Producer (~p) is blocked, will go to sleep.....ZZZ~n",
+            ?LOG_INFO("Producer (~p) is blocked, will go to sleep.....ZZZ~n",
                       [self()]),
             receive
                 resume ->
-                    io:format("Producer (~p) has woken up :-)~n", [self()]),
+                    ?LOG_INFO("Producer (~p) has woken up :-)~n", [self()]),
                     cf_producer_loop(Channel, X, Key,
                                      PublishFun, Payload, N + 1)
             end;
@@ -406,10 +531,10 @@ cf_producer_loop(Channel, X, Key, PublishFun, Payload, N) ->
 cf_handler_loop(Producer) ->
     receive
         #'channel.flow'{active = false} ->
-            io:format("Producer throttling ON~n"),
+            ?LOG_DEBUG("Producer throttling ON~n"),
             cf_handler_loop(Producer);
         #'channel.flow'{active = true} ->
-            io:format("Producer throttling OFF, waking up producer (~p)~n",
+            ?LOG_INFO("Producer throttling OFF, waking up producer (~p)~n",
                       [Producer]),
             Producer ! resume,
             cf_handler_loop(Producer);
@@ -450,21 +575,30 @@ setup_publish(Channel, #publish{routing_key = RoutingKey,
                                 bind_key = BindKey,
                                 payload = Payload}) ->
     ok = setup_exchange(Channel, Q, X, BindKey),
-    lib_amqp:publish(Channel, X, RoutingKey, Payload),
+    Publish = #'basic.publish'{exchange = X, routing_key = RoutingKey},
+    ok = amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
     {ok, Q}.
 
+teardown(Connection, Channel) ->
+    amqp_channel:close(Channel),
+    amqp_connection:close(Connection).
+
 teardown_test(Connection) ->
-    Channel = lib_amqp:start_channel(Connection),
+    Channel = amqp_connection:open_channel(Connection),
     ?assertMatch(true, is_process_alive(Channel)),
     ?assertMatch(true, is_process_alive(Connection)),
-    lib_amqp:teardown(Connection, Channel),
+    teardown(Connection, Channel),
     ?assertMatch(false, is_process_alive(Channel)),
     ?assertMatch(false, is_process_alive(Connection)).
 
 setup_exchange(Channel, Q, X, Binding) ->
-    lib_amqp:declare_exchange(Channel, X, <<"topic">>),
-    lib_amqp:declare_queue(Channel, Q),
-    lib_amqp:bind_queue(Channel, X, Q, Binding),
+    amqp_channel:call(Channel, #'exchange.declare'{exchange = X,
+                                                   type = <<"topic">>}),
+    amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
+    Route = #'queue.bind'{queue = Q,
+                          exchange = X,
+                          routing_key = Binding},
+    amqp_channel:call(Channel, Route),
     ok.
 
 latch_loop(0) ->

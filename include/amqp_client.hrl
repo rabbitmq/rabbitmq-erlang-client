@@ -23,6 +23,21 @@
 %%   Contributor(s): Ben Hood <0x6e6562@gmail.com>.
 %%
 
+-include_lib("rabbit_common/include/rabbit.hrl").
+-include_lib("rabbit_common/include/rabbit_framing.hrl").
+
+-define(PROTOCOL_HEADER,
+        <<"AMQP", 1, 1, ?PROTOCOL_VERSION_MAJOR, ?PROTOCOL_VERSION_MINOR>>).
+
+-record(amqp_msg, {props = #'P_basic'{}, payload = <<>>}).
+
+-record(amqp_params, {username     = <<"guest">>,
+                      password     = <<"guest">>,
+                      virtual_host = <<"/">>,
+                      host         = "localhost",
+                      port         = ?PROTOCOL_PORT,
+                      ssl_options  = undefined}).
+
 -record(connection_state, {username,
                            password,
                            serverhost,
@@ -34,7 +49,8 @@
                            heartbeat,
                            driver,
                            port,
-                           channels = dict:new() }).
+                           channels = dict:new(),
+                           ssl_options}).
 
 -record(channel_state, {number,
                         parent_connection,
@@ -61,3 +77,6 @@
 -record(rpc_server_state, {channel,
                            handler}).
 
+-define(LOG_DEBUG(Format), error_logger:info_msg(Format)).
+-define(LOG_INFO(Format, Args), error_logger:info_msg(Format, Args)).
+-define(LOG_WARN(Format, Args), error_logger:warning_msg(Format, Args)).
