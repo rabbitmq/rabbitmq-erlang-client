@@ -184,7 +184,7 @@ $(COMPILE_DEPS): $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 	mkdir -p $(DEPS_DIR)
 	unzip -o -d $(DEPS_DIR) $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 
-$(EBIN_DIR)/%.beam: $(SOURCE_DIR)/%.erl $(INCLUDES) $(COMPILE_DEPS)
+$(EBIN_DIR)/%.beam: $(SOURCE_DIR)/%.erl $(INCLUDES) $(COMPILE_DEPS) $(INCLUDE_DIR)/version.hrl
 	$(LIBS_PATH) erlc $(ERLC_OPTS) $<
 
 $(TEST_DIR)/%.beam: compile_tests
