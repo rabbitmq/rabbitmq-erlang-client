@@ -173,9 +173,16 @@ start_ok(#connection_state{username = Username, password = Password}) ->
                    {<<"PASSWORD">>, longstr, Password }],
     #'connection.start_ok'{
            client_properties = [
-                            {<<"product">>, longstr, <<"Erlang-AMQC">>},
-                            {<<"version">>, longstr, <<"0.1">>},
-                            {<<"platform">>, longstr, <<"Erlang">>}
+                            {<<"product">>,   longstr, <<"RabbitMQ">>},
+                            {<<"version">>,   longstr, ?VERSION},
+                            {<<"platform">>,  longstr, <<"Erlang">>},
+                            {<<"copyright">>, longstr,
+                             <<"Copyright (C) 2007-2008 LShift Ltd., "
+                               "Cohesive Financial Technologies LLC., "
+                               "and Rabbit Technologies Ltd.">>},
+                            {<<"information">>, longstr,
+                             <<"Licensed under the MPL.  "
+                               "See http://www.rabbitmq.com/">>}
                            ],
            mechanism = <<"AMQPLAIN">>,
            response = rabbit_binary_generator:generate_table(LoginTable)}.

@@ -35,8 +35,13 @@ SOURCE_PACKAGE_NAME=$(PACKAGE)-$(VERSION)-src
 include common.mk
 
 clean: common_clean
+	rm -f  $(INCLUDE_DIR)/version.hrl
 	rm -fr $(DIST_DIR)
 	rm -fr $(DEPS_DIR)
+
+
+$(INCLUDE_DIR)/version.hrl: $(INCLUDE_DIR)/version.hrl.in
+	sed -e 's:%%VERSION%%:$(VERSION):g' < $< > $@
 
 ##############################################################################
 ##  Testing
@@ -76,7 +81,7 @@ $(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS)
 	cp $(BROKER_DIR)/$(INCLUDE_DIR)/*.hrl $(DIST_DIR)/$(COMMON_PACKAGE)/$(INCLUDE_DIR)
 	(cd $(DIST_DIR); zip -r $(COMMON_PACKAGE_NAME) $(COMMON_PACKAGE))
 
-source_tarball: clean $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
+source_tarball: clean $(DIST_DIR)/$(COMMON_PACKAGE_NAME) $(INCLUDE_DIR)/version.hrl
 	mkdir -p $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(DIST_DIR)
 	$(COPY) $(DIST_DIR)/$(COMMON_PACKAGE_NAME) $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/$(DIST_DIR)/
 	$(COPY) README $(DIST_DIR)/$(SOURCE_PACKAGE_NAME)/
