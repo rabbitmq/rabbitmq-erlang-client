@@ -516,15 +516,19 @@ handle_info( {send_command_and_notify, Q, ChPid, Method, Content}, State) ->
     rabbit_amqqueue:notify_sent(Q, ChPid),
     {noreply, State};
 
-
-%% Handle a trapped exit, e.g. from the direct peer
-%% In the direct case this is the local channel
-%% In the network case this is the process that writes to the socket
-%% on a per channel basis
+%% This is sent by the the process that writes to the socket
+%% on a per channel basis. This occurs when the reader process
+%% exits because the server has closed the socket. In this event,
+%% because the channel process is linked to the reader process,
+%% the channel will receive a notification. However, it is a matter
+%% of scheduling as to whether this process receives this EXIT message
+%% before the EXIT message that will receive from the connection
+%% process which will handle the connection.close from the broker.
+%% TODO Look into why the channel process needs to link to the
+%% reader process in the network case.
 %% @private
-handle_info({'EXIT', _Pid, Reason},
-            State = #channel_state{number = Number}) ->
-    {stop, {server_initiated_close, Number, Reason}, State};
+handle_info({'EXIT', _Pid, connection_socket_closed_unexpectedly}, State) ->
+    {noreply, State};
 
 %% This is for a channel exception that is sent by the direct
 %% rabbit_channel process - in this case this process needs to tell
