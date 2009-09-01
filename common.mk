@@ -46,6 +46,10 @@ ifndef TMPDIR
 TMPDIR := /tmp
 endif
 
+ifndef ERL_HOME
+ERL_HOME := /usr/local/lib/erlang
+endif
+
 EBIN_DIR=ebin
 export BROKER_DIR=../rabbitmq-server
 export INCLUDE_DIR=include
@@ -114,15 +118,14 @@ ALL_SSL_COVERAGE := true
 SSL_BROKER_ARGS :=
 endif
 
-PLT=$(HOME)/.dialyzer_plt
-DIALYZER_CALL=dialyzer --plt $(PLT)
+PLT=rabbitmq-erlang-client.plt
+BROKER_PLT=$(BROKER_DIR)/rabbit.plt
 
-.PHONY: all compile compile_tests run run_in_broker dialyzer dialyze_all \
-	add_broker_to_plt prepare_tests all_tests test_suites \
-	test_suites_coverage run_test_broker start_test_broker_node \
-	stop_test_broker_node test_network test_direct test_network_coverage \
-	test_direct_coverage test_common_package clean source_tarball package \
-	boot_broker unboot_broker
+.PHONY: all compile compile_tests run run_in_broker dialyze create_plt \
+	prepare_tests all_tests test_suites test_suites_coverage run_test_broker \
+	start_test_broker_node stop_test_broker_node test_network test_direct \
+	test_network_coverage test_direct_coverage test_common_package clean \
+	source_tarball package boot_broker unboot_broker
 
 all: package
 
@@ -130,27 +133,18 @@ common_clean:
 	rm -f $(EBIN_DIR)/*.beam
 	rm -f erl_crash.dump
 	rm -fr $(DOC_DIR)
+	rm -f $(PLT) .last_valid_dialysis
 	$(MAKE) -C $(TEST_DIR) clean
 
 compile: $(TARGETS)
 
-compile_tests: $(TEST_DIR) $(COMPILE_DEPS)
-	$(MAKE) -C $(TEST_DIR)
+compile_tests: $(TEST_DIR)
 
 run: compile
 	erl -pa $(LOAD_PATH)
 
 run_in_broker: compile $(BROKER_DIR)
 	$(MAKE) RABBITMQ_SERVER_START_ARGS='$(PA_LOAD_PATH)' -C $(BROKER_DIR) run
-
-dialyze: $(TARGETS)
-	$(DIALYZER_CALL) -c $^
-
-dialyze_all: $(TARGETS) $(TEST_TARGETS)
-	$(DIALYZER_CALL) -c $^
-
-add_broker_to_plt: $(BROKER_DIR)/ebin
-	$(DIALYZER_CALL) --add_to_plt -r $<
 
 $(DOC_DIR)/overview.edoc: $(SOURCE_DIR)/overview.edoc.in
 	mkdir -p $(DOC_DIR)
@@ -160,6 +154,45 @@ $(DOC_DIR)/index.html: $(COMPILE_DEPS) $(DOC_DIR)/overview.edoc $(SOURCES)
 	$(LIBS_PATH) erl -noshell -eval 'edoc:application(amqp_client, ".", [{preprocess, true}])' -run init stop
 
 doc: $(DOC_DIR)/index.html
+
+###############################################################################
+## Dialyzer
+###############################################################################
+
+dialyze: compile compile_tests $(BROKER_PLT) $(PLT) .last_valid_dialysis
+
+create_plt: compile compile_tests $(BROKER_PLT) $(PLT)
+
+$(PLT): $(TARGETS) $(TEST_TARGETS)
+	if [ -f $@ -a $(BROKER_PLT) -ot $@ ]; then \
+	    DIALYZER_INPUT_FILES="$?"; \
+	else \
+	    cp $(BROKER_PLT) $@ && \
+	    DIALYZER_INPUT_FILES="$(TARGETS)"; \
+	fi && \
+	DIALYZER_OUTPUT=$$(dialyzer --plt $@ --add_to_plt -c $$DIALYZER_INPUT_FILES); \
+	echo "$$DIALYZER_OUTPUT"; \
+	echo "$$DIALYZER_OUTPUT" | grep "done (passed successfully)"
+
+.last_valid_dialysis: $(TARGETS) $(TEST_TARGETS)
+	DIALYZER_OUTPUT=$$(erl -noinput -eval \
+        "{ok, Files} = regexp:split(\"$?\", \" \"), \
+		 lists:foreach( \
+	         fun(Warning) -> io:format(\"~s\", [dialyzer:format_warning(Warning)]) end, \
+             dialyzer:run([{init_plt, \"$(PLT)\"}, {files, Files}])), \
+         halt()."); \
+	if [ ! "$$DIALYZER_OUTPUT" ]; then \
+	    echo "Ok, dialyzer returned no warnings." && \
+	    touch .last_valid_dialysis; \
+	else \
+	    echo "dialyzer returned the following warnings:" && \
+	    echo "$$DIALYZER_OUTPUT" && \
+	    false; \
+	fi
+
+.PHONY: $(BROKER_PLT)
+$(BROKER_PLT):
+	$(MAKE) ERL_HOME="$(ERL_HOME)" -C $(BROKER_DIR) create_plt
 
 ###############################################################################
 ##  Packaging
@@ -185,15 +218,14 @@ $(COMPILE_DEPS): $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 $(EBIN_DIR)/%.beam: $(SOURCE_DIR)/%.erl $(INCLUDES) $(COMPILE_DEPS)
 	$(LIBS_PATH) erlc $(ERLC_OPTS) $<
 
-$(TEST_DIR)/%.beam: compile_tests
+$(TEST_DIR)/%.beam: $(TEST_DIR)
 
-$(BROKER_DIR):
-	test -e $(BROKER_DIR)
-	$(MAKE_BROKER)
+.PHONY: $(TEST_DIR)
+$(TEST_DIR): $(COMPILE_DEPS)
+	$(MAKE) -C $(TEST_DIR)
 
 $(DIST_DIR):
 	mkdir -p $@
 
 $(DEPS_DIR):
 	mkdir -p $@
-

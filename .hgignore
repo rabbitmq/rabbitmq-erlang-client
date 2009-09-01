@@ -4,3 +4,7 @@
 ^deps/
 ^erl_crash.dump$
 ^doc/
+
+^\.last_valid_dialysis$
+^rabbitmq-erlang-client.plt$
+
