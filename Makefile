@@ -30,14 +30,27 @@ DEPS=$(shell erl -noshell -eval '{ok,[{_,_,[_,_,{modules, Mods},_,_,_]}]} = \
 VERSION=0.0.0
 SOURCE_PACKAGE_NAME=$(PACKAGE)-$(VERSION)-src
 
+<<<<<<< local
 .PHONY: common_package dist
+=======
+INFILES=$(shell find . -name '*.app.in')
+INTARGETS=$(patsubst %.in, %, $(INFILES))
+
+.PHONY: common_package
+>>>>>>> other
 
 include common.mk
 
 clean: common_clean
+<<<<<<< local
 	rm -f  $(INCLUDE_DIR)/version.hrl
+=======
+	rm -f $(INTARGETS)
+>>>>>>> other
 	rm -fr $(DIST_DIR)
-	rm -fr $(DEPS_DIR)
+
+%.app: %.app.in
+	sed -e 's:%%VSN%%:$(VERSION):g' < $< > $@
 
 <<<<<<< local
 dist: doc source_tarball package
@@ -76,7 +89,7 @@ COPY=cp -pR
 
 common_package: $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 
-$(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS)
+$(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS) $(COMMON_PACKAGE).app
 	$(MAKE) -C $(BROKER_DIR)
 	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(INCLUDE_DIR)
 	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE_VSN)/$(EBIN_DIR)

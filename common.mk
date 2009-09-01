@@ -136,13 +136,18 @@ common_clean:
 
 compile: $(TARGETS)
 
+<<<<<<< local
 compile_tests: $(TEST_DIR) $(COMPILE_DEPS)
 	$(MAKE) -C $(TEST_DIR) VERSION=$(VERSION)
+=======
+compile_tests: $(TEST_DIR) $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).app
+	$(MAKE) -C $(TEST_DIR)
+>>>>>>> other
 
-run: compile
+run: compile $(EBIN_DIR)/$(PACKAGE).app
 	erl -pa $(LOAD_PATH)
 
-run_in_broker: compile $(BROKER_DIR)
+run_in_broker: compile $(BROKER_DIR) $(EBIN_DIR)/$(PACKAGE).app
 	$(MAKE) RABBITMQ_SERVER_START_ARGS='$(PA_LOAD_PATH)' -C $(BROKER_DIR) run
 
 dialyze: $(TARGETS)
@@ -167,12 +172,23 @@ doc: $(DOC_DIR)/index.html
 ##  Packaging
 ###############################################################################
 
+<<<<<<< local
 $(DIST_DIR)/$(PACKAGE_NAME): $(TARGETS)
 	rm -rf $(DIST_DIR)/$(PACKAGE_VSN)
 	mkdir -p $(DIST_DIR)/$(PACKAGE_VSN)
 	cp -r $(EBIN_DIR) $(DIST_DIR)/$(PACKAGE_VSN)
 	cp -r $(INCLUDE_DIR) $(DIST_DIR)/$(PACKAGE_VSN)
 	(cd $(DIST_DIR); zip -r $(PACKAGE_NAME) $(PACKAGE_VSN))
+=======
+$(DIST_DIR)/$(PACKAGE_NAME): $(TARGETS) $(EBIN_DIR)/$(PACKAGE).app
+	rm -rf $(DIST_DIR)/$(PACKAGE)
+	mkdir -p $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	cp -r $(EBIN_DIR)/*.beam $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	cp -r $(EBIN_DIR)/*.app $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	mkdir -p $(DIST_DIR)/$(PACKAGE)/$(INCLUDE_DIR)
+	cp -r $(INCLUDE_DIR)/* $(DIST_DIR)/$(PACKAGE)/$(INCLUDE_DIR)
+	(cd $(DIST_DIR); zip -r $(PACKAGE_NAME) $(PACKAGE))
+>>>>>>> other
 
 package: $(DIST_DIR)/$(PACKAGE_NAME)
 
