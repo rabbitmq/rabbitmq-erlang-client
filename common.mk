@@ -46,10 +46,6 @@ ifndef TMPDIR
 TMPDIR := /tmp
 endif
 
-ifndef ERL_HOME
-ERL_HOME := /usr/local/lib/erlang
-endif
-
 EBIN_DIR=ebin
 export BROKER_DIR=../rabbitmq-server
 export INCLUDE_DIR=include
@@ -192,7 +188,7 @@ $(PLT): $(TARGETS) $(TEST_TARGETS)
 
 .PHONY: $(BROKER_PLT)
 $(BROKER_PLT):
-	$(MAKE) ERL_HOME="$(ERL_HOME)" -C $(BROKER_DIR) create_plt
+	$(MAKE) -C $(BROKER_DIR) create-plt
 
 ###############################################################################
 ##  Packaging
