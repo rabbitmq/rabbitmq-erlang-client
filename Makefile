@@ -64,6 +64,10 @@ COPY=cp -pR
 
 common_package: $(DIST_DIR)/$(COMMON_PACKAGE_NAME)
 
+$(BROKER_DIR)/$(INCLUDE_DIR)/rabbit_framing.hrl \
+$(BROKER_DIR)/$(SOURCE_DIR)/rabbit_framing.erl:
+	$(MAKE) -C $(BROKER_DIR)
+
 $(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS)
 	$(MAKE) -C $(BROKER_DIR)
 	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE)/$(INCLUDE_DIR)
