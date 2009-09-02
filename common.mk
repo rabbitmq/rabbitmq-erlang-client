@@ -99,6 +99,7 @@ ERLC_OPTS=-I $(INCLUDE_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(shell [ $(USE_
 RABBITMQ_NODENAME=rabbit
 PA_LOAD_PATH=-pa $(realpath $(LOAD_PATH))
 RABBITMQCTL=$(BROKER_DIR)/scripts/rabbitmqctl
+ERL_RABBIT_DIALYZER=erl -noinput -eval "code:load_abs(\"$(BROKER_DIR)/ebin/rabbit_dialyzer\")."
 
 ifdef SSL_CERTS_DIR
 SSL := true
@@ -160,31 +161,22 @@ dialyze: compile compile_tests $(BROKER_PLT) $(PLT) .last_valid_dialysis
 create_plt: compile compile_tests $(BROKER_PLT) $(PLT)
 
 $(PLT): $(TARGETS) $(TEST_TARGETS)
+	$(MAKE) -C $(BROKER_DIR) ebin/rabbit_dialyzer.beam
 	if [ -f $@ -a $(BROKER_PLT) -ot $@ ]; then \
 	    DIALYZER_INPUT_FILES="$?"; \
 	else \
 	    cp $(BROKER_PLT) $@ && \
-	    DIALYZER_INPUT_FILES="$(TARGETS)"; \
-	fi && \
-	DIALYZER_OUTPUT=$$(dialyzer --plt $@ --add_to_plt -c $$DIALYZER_INPUT_FILES); \
-	echo "$$DIALYZER_OUTPUT"; \
-	echo "$$DIALYZER_OUTPUT" | grep "done (passed successfully)"
+		rm -f .last_valid_dialysis && \
+	    DIALYZER_INPUT_FILES="$(TARGETS) $(TEST_TARGETS)"; \
+	fi; \
+	$(ERL_RABBIT_DIALYZER) -eval \
+	    "rabbit_dialyzer:update_plt(\"$@\", \"$$DIALYZER_INPUT_FILES\"), halt()."
 
 .last_valid_dialysis: $(TARGETS) $(TEST_TARGETS)
-	DIALYZER_OUTPUT=$$(erl -noinput -eval \
-        "{ok, Files} = regexp:split(\"$?\", \" \"), \
-		 lists:foreach( \
-	         fun(Warning) -> io:format(\"~s\", [dialyzer:format_warning(Warning)]) end, \
-             dialyzer:run([{init_plt, \"$(PLT)\"}, {files, Files}])), \
-         halt()."); \
-	if [ ! "$$DIALYZER_OUTPUT" ]; then \
-	    echo "Ok, dialyzer returned no warnings." && \
-	    touch .last_valid_dialysis; \
-	else \
-	    echo "dialyzer returned the following warnings:" && \
-	    echo "$$DIALYZER_OUTPUT" && \
-	    false; \
-	fi
+	$(MAKE) -C $(BROKER_DIR) ebin/rabbit_dialyzer.beam
+	$(ERL_RABBIT_DIALYZER) -eval \
+	    "rabbit_dialyzer:dialyze_files(\"$(PLT)\", \"$?\"), halt()." && \
+	touch $@
 
 .PHONY: $(BROKER_PLT)
 $(BROKER_PLT):

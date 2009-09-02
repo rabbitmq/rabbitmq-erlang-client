@@ -222,23 +222,10 @@ clean
     rabbitmq-erlang-client make targets or client errors.
 
 dialyze
-    Analyses the client source code with dialyzer. Uses PLT file from default
-    location: ~/.dialyzer_plt. Use
-
-        $ make PLT=/path/to/plt dialyze
-
-    to override this. Add broker to PLT beforehand, otherwise you will a lot
-    of 'unknown function' warnings. See add_broker_to_plt make target.
-
-dialyze_all
-    Same as dialyze, except that this also analyses tests source code.
-
-add_broker_to_plt
-    Adds broker .beam files to default plt. Use
-
-        $ make PLT=/path/to/plt add_broker_to_plt
-
-    to override default plt location ( ~/.dialyzer_plt ).
+    Analyses the client and test source code with dialyzer. This also triggers
+    the creation of a PLT file which includes the client, the server and all
+    the OTP applications RabbitMQ depends on. This could take more than 10
+    minutes to complete the first time you run it.
 
 source_tarball
     Creates tarball of all the client source code.
