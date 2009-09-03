@@ -90,10 +90,10 @@ MKTEMP=$$(mktemp $(TMPDIR)/tmp.XXXXXXXXXX)
 
 ifndef USE_SPECS
 # our type specs rely on features / bug fixes in dialyzer that are
-# only available in R12B-3 upwards
+# only available in R13B upwards (R13B is eshell 5.7.1)
 #
 # NB: the test assumes that version number will only contain single digits
-export USE_SPECS=$(shell if [ $$(erl -noshell -eval 'io:format(erlang:system_info(version)), halt().') \> "5.6.2" ]; then echo "true"; else echo "false"; fi)
+export USE_SPECS=$(shell if [ $$(erl -noshell -eval 'io:format(erlang:system_info(version)), halt().') \> "5.7.0" ]; then echo "true"; else echo "false"; fi)
 endif
 
 ERLC_OPTS=-I $(INCLUDE_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(shell [ $(USE_SPECS) = "true" ] && echo "-Duse_specs")
@@ -137,12 +137,12 @@ common_clean:
 
 compile: $(TARGETS)
 
-compile_tests: $(TEST_DIR)
+compile_tests: $(TEST_DIR) $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).ap
 
-run: compile
+run: compile $(EBIN_DIR)/$(PACKAGE).app
 	erl -pa $(LOAD_PATH)
 
-run_in_broker: compile $(BROKER_DIR)
+run_in_broker: compile $(BROKER_DIR) $(EBIN_DIR)/$(PACKAGE).app
 	$(MAKE) RABBITMQ_SERVER_START_ARGS='$(PA_LOAD_PATH)' -C $(BROKER_DIR) run
 
 $(DOC_DIR)/overview.edoc: $(SOURCE_DIR)/overview.edoc.in
@@ -188,11 +188,13 @@ $(BROKER_PLT):
 ##  Packaging
 ###############################################################################
 
-$(DIST_DIR)/$(PACKAGE_NAME): $(TARGETS)
+$(DIST_DIR)/$(PACKAGE_NAME): $(TARGETS) $(EBIN_DIR)/$(PACKAGE).app
 	rm -rf $(DIST_DIR)/$(PACKAGE)
-	mkdir -p $(DIST_DIR)/$(PACKAGE)
-	cp -r $(EBIN_DIR) $(DIST_DIR)/$(PACKAGE)
-	cp -r $(INCLUDE_DIR) $(DIST_DIR)/$(PACKAGE)
+	mkdir -p $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	cp -r $(EBIN_DIR)/*.beam $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	cp -r $(EBIN_DIR)/*.app $(DIST_DIR)/$(PACKAGE)/$(EBIN_DIR)
+	mkdir -p $(DIST_DIR)/$(PACKAGE)/$(INCLUDE_DIR)
+	cp -r $(INCLUDE_DIR)/* $(DIST_DIR)/$(PACKAGE)/$(INCLUDE_DIR)
 	(cd $(DIST_DIR); zip -r $(PACKAGE_NAME) $(PACKAGE))
 
 package: $(DIST_DIR)/$(PACKAGE_NAME)
@@ -219,3 +221,4 @@ $(DIST_DIR):
 
 $(DEPS_DIR):
 	mkdir -p $@
+

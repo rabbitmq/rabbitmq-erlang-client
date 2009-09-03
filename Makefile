@@ -30,13 +30,19 @@ DEPS=$(shell erl -noshell -eval '{ok,[{_,_,[_,_,{modules, Mods},_,_,_]}]} = \
 VERSION=0.0.0
 SOURCE_PACKAGE_NAME=$(PACKAGE)-$(VERSION)-src
 
+INFILES=$(shell find . -name '*.app.in')
+INTARGETS=$(patsubst %.in, %, $(INFILES))
+
 .PHONY: common_package
 
 include common.mk
 
 clean: common_clean
+	rm -f $(INTARGETS)
 	rm -fr $(DIST_DIR)
-	rm -fr $(DEPS_DIR)
+
+%.app: %.app.in
+	sed -e 's:%%VSN%%:$(VERSION):g' < $< > $@
 
 ##############################################################################
 ##  Testing
@@ -68,7 +74,7 @@ $(BROKER_DIR)/$(INCLUDE_DIR)/rabbit_framing.hrl \
 $(BROKER_DIR)/$(SOURCE_DIR)/rabbit_framing.erl:
 	$(MAKE) -C $(BROKER_DIR)
 
-$(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS)
+$(DIST_DIR)/$(COMMON_PACKAGE_NAME): $(BROKER_SOURCES) $(BROKER_HEADERS) $(COMMON_PACKAGE).app
 	$(MAKE) -C $(BROKER_DIR)
 	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE)/$(INCLUDE_DIR)
 	mkdir -p $(DIST_DIR)/$(COMMON_PACKAGE)/$(EBIN_DIR)

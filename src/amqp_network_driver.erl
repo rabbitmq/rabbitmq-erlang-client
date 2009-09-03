@@ -49,7 +49,7 @@ handshake(State = #connection_state{serverhost = Host, port = Port,
         {ok, Sock} ->
             do_handshake(Sock, State);
         {error, Reason} ->
-            io:format("Could not start the network driver: ~p~n",[Reason]),
+            ?LOG_INFO("Could not start the network driver: ~p~n",[Reason]),
             exit(Reason)
     end;
 
@@ -64,7 +64,7 @@ handshake(State = #connection_state{serverhost = Host, port = Port,
                     RabbitSslSock = #ssl_socket{ssl = SslSock, tcp = Sock},
                     do_handshake(RabbitSslSock, State);
                 {error, Reason} ->
-                    io:format("Could not upgrade the network driver to ssl: "
+                    ?LOG_INFO("Could not upgrade the network driver to ssl: "
                               "~p~n", [Reason]),
                     exit(Reason)
             end;
@@ -118,9 +118,8 @@ receive_writer_send_command_signal(Writer) ->
     end.
 
 handle_broker_close(#connection_state{channel0_writer_pid = Writer,
-                                      reader_pid = Reader}) ->
-    CloseOk = #'connection.close_ok'{},
-    rabbit_writer:send_command(Writer, CloseOk),
+                                      reader_pid          = Reader}) ->
+    do(Writer, #'connection.close_ok'{}),
     rabbit_writer:shutdown(Writer),
     erlang:send_after(?SOCKET_CLOSING_TIMEOUT, Reader, close).
 
@@ -169,13 +168,25 @@ network_handshake(Writer,
     State#connection_state{channel_max = ChannelMax, heartbeat = Heartbeat}.
 
 start_ok(#connection_state{username = Username, password = Password}) ->
+    %% TODO This eagerly starts the amqp_client application in order to
+    %% to get the version from the app descriptor, which may be
+    %% overkill - maybe there is a more suitable point to boot the app
+    rabbit_misc:start_applications([amqp_client]),
+    {ok, Vsn} = application:get_key(amqp_client, vsn),
     LoginTable = [ {<<"LOGIN">>, longstr, Username },
                    {<<"PASSWORD">>, longstr, Password }],
     #'connection.start_ok'{
            client_properties = [
-                            {<<"product">>, longstr, <<"Erlang-AMQC">>},
-                            {<<"version">>, longstr, <<"0.1">>},
-                            {<<"platform">>, longstr, <<"Erlang">>}
+                            {<<"product">>,   longstr, <<"RabbitMQ">>},
+                            {<<"version">>,   longstr, list_to_binary(Vsn)},
+                            {<<"platform">>,  longstr, <<"Erlang">>},
+                            {<<"copyright">>, longstr,
+                             <<"Copyright (C) 2007-2009 LShift Ltd., "
+                               "Cohesive Financial Technologies LLC., "
+                               "and Rabbit Technologies Ltd.">>},
+                            {<<"information">>, longstr,
+                             <<"Licensed under the MPL.  "
+                               "See http://www.rabbitmq.com/">>}
                            ],
            mechanism = <<"AMQPLAIN">>,
            response = rabbit_binary_generator:generate_table(LoginTable)}.
@@ -247,8 +258,8 @@ handle_frame(Type, Channel, Payload) ->
             heartbeat;
         trace ->
             trace;
-        {method, 'connection.close_ok', Content} ->
-            send_frame(Channel, {method, 'connection.close_ok', Content}),
+        {method, Method = 'connection.close_ok', none} ->
+            send_frame(Channel, {method, Method}),
             closed_ok;
         AnalyzedFrame ->
             send_frame(Channel, AnalyzedFrame)
