@@ -137,7 +137,7 @@ common_clean:
 
 compile: $(TARGETS)
 
-compile_tests: $(TEST_DIR) $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).ap
+compile_tests: $(TEST_DIR) $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).app
 
 run: compile $(EBIN_DIR)/$(PACKAGE).app
 	erl -pa $(LOAD_PATH)
