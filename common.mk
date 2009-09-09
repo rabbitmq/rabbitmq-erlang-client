@@ -101,7 +101,6 @@ ERLC_OPTS=-I $(INCLUDE_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(shell [ $(USE_
 RABBITMQ_NODENAME=rabbit
 PA_LOAD_PATH=-pa $(realpath $(LOAD_PATH))
 RABBITMQCTL=$(BROKER_DIR)/scripts/rabbitmqctl
-ERL_RABBIT_DIALYZER=erl -noinput -eval "code:load_abs(\"$(BROKER_DIR)/ebin/rabbit_dialyzer\")."
 
 ifdef SSL_CERTS_DIR
 SSL := true
@@ -119,6 +118,10 @@ endif
 
 PLT=rabbitmq-erlang-client.plt
 BROKER_PLT=$(BROKER_DIR)/rabbit.plt
+RABBIT_DIALYZER_SOURCE=src/rabbit_dialyzer.erl
+RABBIT_DIALYZER=ebin/rabbit_dialyzer
+RABBIT_DIALYZER_BEAM=$(RABBIT_DIALYZER).beam
+ERL_RABBIT_DIALYZER=erl -noinput -eval "code:load_abs(\"$(BROKER_DIR)/$(RABBIT_DIALYZER)\")."
 
 .PHONY: all compile compile_tests run run_in_broker dialyze create_plt \
 	prepare_tests all_tests test_suites test_suites_coverage run_test_broker \
@@ -137,7 +140,7 @@ common_clean:
 
 compile: $(TARGETS)
 
-compile_tests: $(TEST_DIR) $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).app
+compile_tests: $(TEST_TARGETS)
 
 run: compile $(EBIN_DIR)/$(PACKAGE).app
 	erl -pa $(LOAD_PATH)
@@ -158,30 +161,29 @@ doc: $(DOC_DIR)/index.html
 ## Dialyzer
 ###############################################################################
 
-dialyze: compile compile_tests $(BROKER_PLT) $(PLT) .last_valid_dialysis
+dialyze: .last_valid_dialysis
 
-create_plt: compile compile_tests $(BROKER_PLT) $(PLT)
+create_plt: $(PLT)
 
-$(PLT): $(TARGETS) $(TEST_TARGETS)
-	$(MAKE) -C $(BROKER_DIR) ebin/rabbit_dialyzer.beam
-	if [ -f $@ -a $(BROKER_PLT) -ot $@ ]; then \
-	    DIALYZER_INPUT_FILES="$?"; \
+$(PLT): $(TARGETS) $(TEST_TARGETS) $(BROKER_PLT) $(BROKER_DIR)/$(RABBIT_DIALYZER_BEAM)
+	test -f $@ -a $(BROKER_PLT) -ot $@ || cp $(BROKER_PLT) $@
+	$(ERL_RABBIT_DIALYZER) -eval \
+	    "rabbit_dialyzer:update_plt(\"$@\", \"$(strip $(TARGETS) $(TEST_TARGETS))\"), halt()."
+
+.last_valid_dialysis: $(TARGETS) $(TEST_TARGETS) $(PLT) $(BROKER_DIR)/$(RABBIT_DIALYZER_BEAM)
+	if [ $(PLT) -ot $@ ]; then \
+	    DIALYZER_INPUT_FILES="$(filter %.beam, $?)"; \
 	else \
-	    cp $(BROKER_PLT) $@ && \
-		rm -f .last_valid_dialysis && \
-	    DIALYZER_INPUT_FILES="$(TARGETS) $(TEST_TARGETS)"; \
+	    DIALYZER_INPUT_FILES="$(strip $(TARGETS) $(TEST_TARGETS))"; \
 	fi; \
 	$(ERL_RABBIT_DIALYZER) -eval \
-	    "rabbit_dialyzer:update_plt(\"$@\", \"$$DIALYZER_INPUT_FILES\"), halt()."
-
-.last_valid_dialysis: $(TARGETS) $(TEST_TARGETS)
-	$(MAKE) -C $(BROKER_DIR) ebin/rabbit_dialyzer.beam
-	$(ERL_RABBIT_DIALYZER) -eval \
-	    "rabbit_dialyzer:dialyze_files(\"$(PLT)\", \"$?\"), halt()." && \
+	    "rabbit_dialyzer:dialyze_files(\"$(PLT)\", \"$$DIALYZER_INPUT_FILES\"), halt()." && \
 	touch $@
 
-.PHONY: $(BROKER_PLT)
-$(BROKER_PLT):
+$(BROKER_DIR)/$(RABBIT_DIALYZER_BEAM): $(BROKER_DIR)/$(RABBIT_DIALYZER_SOURCE)
+	$(MAKE) -C $(BROKER_DIR) $(RABBIT_DIALYZER_BEAM)
+
+$(BROKER_PLT): $(BROKER_HEADERS) $(BROKER_SOURCES)
 	$(MAKE) -C $(BROKER_DIR) create-plt
 
 ###############################################################################
@@ -211,9 +213,10 @@ $(EBIN_DIR)/%.beam: $(SOURCE_DIR)/%.erl $(INCLUDES) $(COMPILE_DEPS)
 	$(LIBS_PATH) erlc $(ERLC_OPTS) $<
 
 $(TEST_DIR)/%.beam: $(TEST_DIR)
+	
 
 .PHONY: $(TEST_DIR)
-$(TEST_DIR): $(COMPILE_DEPS)
+$(TEST_DIR): $(COMPILE_DEPS) $(EBIN_DIR)/$(PACKAGE).app
 	$(MAKE) -C $(TEST_DIR)
 
 $(DIST_DIR):
