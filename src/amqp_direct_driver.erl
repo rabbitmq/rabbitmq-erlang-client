@@ -31,6 +31,7 @@
 -export([handshake/1, open_channel/2, close_channel/3, close_connection/3]).
 -export([do/2, do/3]).
 -export([handle_broker_close/1]).
+-export([handle_channel_death/3]).
 
 %---------------------------------------------------------------------------
 % Driver API Methods
@@ -68,4 +69,7 @@ do(Writer, Method, Content) ->
     rabbit_channel:do(Writer, Method, Content).
 
 handle_broker_close(_State) ->
+    ok.
+
+handle_channel_death(_Number, _Reason, _ConnectionState) ->
     ok.

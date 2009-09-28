@@ -265,6 +265,11 @@ unregister_channel(Channel,
 is_registered_channel(Channel, #connection_state{channels = Channels}) ->
     dict:is_key(Channel, Channels).
 
+%% Resolve channel by passing {channel, ChannelNumber} or {chpid, ChannelPid}
+resolve_channel(Channel, #connection_state{channels = Channels}) ->
+    {ok, Val} = dict:find(Channel, Channels),
+    Val.
+
 
 %%---------------------------------------------------------------------------
 %% gen_server callbacks
@@ -342,7 +347,8 @@ handle_info({'EXIT', MainReaderPid, Reason},
 
 %% Handle exit from other pid
 %% @private
-handle_info({'EXIT', Pid, Reason}, State = #connection_state{closing = false}) ->
+handle_info({'EXIT', Pid, Reason}, State = #connection_state{closing = false,
+                                                             driver = Driver}) ->
     case {is_registered_channel({chpid, Pid}, State), Reason} of
         %% Normal amqp_channel shutdown
         {true, normal} ->
@@ -360,7 +366,21 @@ handle_info({'EXIT', Pid, Reason}, State = #connection_state{closing = false}) -
         {true, _} ->
             ?LOG_WARN("Connection: Handling exit from channel (~p). "
                       "Reason: ~p~n", [Pid, Reason]),
-            {noreply, unregister_channel({chpid, Pid}, State)};
+            {channel, Number} = resolve_channel({chpid, Pid}, State),
+            case catch Driver:handle_channel_death(Number, Reason, State) of
+                ok ->
+                    {noreply, unregister_channel({chpid, Pid}, State)};
+                waiting_for_close_ok_timed_out ->
+                    ?LOG_WARN("Timed out waiting for channel.close_ok after "
+                              "sending channel.close on behalf of dead channel "
+                              " (~p)~n", [Pid]),
+                    {noreply, unregister_channel({chpid, Pid}, State)};
+                {'EXIT', Error} ->
+                    ?LOG_WARN("Failed sending 'channel.close' on behalf of "
+                              "channel (~p) that died. Reason: ",
+                              [Pid, Error]),
+                    {stop, {failed_sending_channel_close, Error}, State}
+            end;
         %% Exit signal from unknown pid
         {false, _} ->
             ?LOG_WARN("Connection (~p) closing: received unexpected exit signal "

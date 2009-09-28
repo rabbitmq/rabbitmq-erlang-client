@@ -34,10 +34,12 @@
 -export([start_main_reader/2, start_writer/2]).
 -export([do/2, do/3]).
 -export([handle_broker_close/1]).
+-export([handle_channel_death/3]).
 
 -define(SOCKET_CLOSING_TIMEOUT, 1000).
 -define(CLIENT_CLOSE_TIMEOUT, 5000).
 -define(HANDSHAKE_RECEIVE_TIMEOUT, 60000).
+-define(CHANNEL_CLOSE_TIMEOUT, 5000).
 
 %---------------------------------------------------------------------------
 % Driver API Methods
@@ -72,7 +74,6 @@ handshake(State = #connection_state{serverhost = Host, port = Port,
             ?LOG_WARN("Could not start the network driver: ~p~n", [Reason]),
             exit(Reason)
     end.
-
 
 
 %% The reader runs unaware of the channel number that it is bound to
@@ -128,13 +129,61 @@ handle_broker_close(#connection_state{channel0_writer_pid = Writer,
     erlang:send_after(?SOCKET_CLOSING_TIMEOUT, MainReader,
                       socket_closing_timeout).
 
+%% Handles the death of a channel because of an internal error in the client,
+%% by 'faking' a 'channel.close' to let the server know so it can unregister
+%% it.
+%% Starts the framing channel for the channel that died, sends a 'channel.close'
+%% on behalf of the channel, gets 'channel.close_ok' from the framing
+%% channel and shuts the framing channel down.
+handle_channel_death(ChannelNumber, _Reason,
+                     #connection_state{sock = Sock,
+                                       main_reader_pid = MainReaderPid}) ->
+    %% Start and register a framing channel for the channel that died
+    FramingPid = start_framing_channel(),
+    MainReaderPid ! {register_framing_channel_and_signal_back, ChannelNumber,
+                     FramingPid, self()},
+    receive
+        {registered_framing_channel, FramingPid} -> ok;
+        {'EXIT', MainReaderPid, DeathReason}     -> throw({main_reader_died,
+                                                           DeathReason})
+    end,
+    %% Send a 'channel.close' on behalf of the dead channel
+    rabbit_writer:internal_send_command(
+        Sock, ChannelNumber,
+        #'channel.close'{reply_text = <<"Internal error in channel process">>,
+                         reply_code = 550,
+                         class_id = 0,
+                         method_id = 0}),
+    %% Wait for 'channel.close_ok' and kill the framing channel
+    receive
+        {'$gen_cast', {method, #'channel.close_ok'{}, none}} ->
+            FramingPid ! {'EXIT', self(), normal},
+            receive {'EXIT', FramingPid, _}  -> ok end,
+            ok;
+        {'EXIT', FramingPid, Reason} ->
+            throw({reader_died_while_waiting_for_close_ok, Reason})
+    after ?CHANNEL_CLOSE_TIMEOUT ->
+        FramingPid ! {'EXIT', self(), normal},
+        receive {'EXIT', FramingPid, _}  -> ok end,
+        %% Clear 'channel.close_ok' message if one did come up in between
+        %% timeout and kill
+        receive {'$gen_cast', {method, #'channel.close_ok'{}, none}} -> ok
+        after 0 -> waiting_for_close_ok_timed_out
+        end
+    end.
+
 %---------------------------------------------------------------------------
-% AMQP message sending and receiving
+% AMQP message receiving
 %---------------------------------------------------------------------------
 
-send_frame(Channel, Frame) ->
-    {framing_pid, FramingPid} = resolve_framing_channel({channel, Channel}),
-    rabbit_framing_channel:process(FramingPid, Frame).
+pass_frame_to_framing_channel(Channel, Frame) ->
+    case resolve_framing_channel({channel, Channel}) of
+        {framing_pid, FramingPid} ->
+            rabbit_framing_channel:process(FramingPid, Frame);
+        undefined ->
+            ?LOG_INFO("Dropping frame for channel ~p, which is dead or does "
+                      "not exist: ~p~n", [Channel, Frame])
+    end.
 
 recv(#connection_state{main_reader_pid = MainReaderPid}) ->
     receive
@@ -243,6 +292,11 @@ main_reader_loop(Sock, Type, Channel, Length) ->
         {register_framing_channel, ChannelNumber, FramingPid} ->
             register_framing_channel(ChannelNumber, FramingPid),
             main_reader_loop(Sock, Type, Channel, Length);
+        {register_framing_channel_and_signal_back, ChannelNumber, FramingPid,
+         Caller} ->
+            register_framing_channel(ChannelNumber, FramingPid),
+            Caller ! {registered_framing_channel, FramingPid},
+            main_reader_loop(Sock, Type, Channel, Length);
         timeout ->
             ?LOG_WARN("Reader (~p) received timeout from heartbeat, "
                       "exiting ~n", [self()]),
@@ -282,10 +336,10 @@ handle_frame(Type, Channel, Payload) ->
         trace ->
             trace;
         {method, Method = 'connection.close_ok', none} ->
-            send_frame(Channel, {method, Method}),
+            pass_frame_to_framing_channel(Channel, {method, Method}),
             closed_ok;
         AnalyzedFrame ->
-            send_frame(Channel, AnalyzedFrame)
+            pass_frame_to_framing_channel(Channel, AnalyzedFrame)
     end.
 
 start_framing_channel() ->

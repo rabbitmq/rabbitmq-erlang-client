@@ -80,13 +80,13 @@ channel_death_test(Connection) ->
     C2 = amqp_connection:open_channel(Connection),
     Publish = #'basic.publish'{routing_key = <<>>, exchange = <<>>},
     Message = #amqp_msg{props = <<>>, payload = <<>>},
-    %ok = amqp_channel:call(C2, Publish, Message),
-    %?assertNot(is_process_alive(C2)),
-    %?assert(is_process_alive(Connection)),
-    ok.
-    %C3 = amqp_connection:open_channel(Connection),
-    %?assert(is_process_alive(C3)),
-    %test_util:teardown(Connection, C3).
+    ok = amqp_channel:call(C2, Publish, Message),
+    timer:sleep(1000),
+    ?assertNot(is_process_alive(C2)),
+    ?assert(is_process_alive(Connection)),
+    C3 = amqp_connection:open_channel(Connection),
+    ?assert(is_process_alive(C3)),
+    test_util:teardown(Connection, C3).
     
 
 non_existent_user_test() ->
