@@ -45,7 +45,8 @@
                    max_channel,
                    heartbeat,
                    closing = false,
-                   channels = amqp_channel_util:new_channel_dict()}).
+                   channels = amqp_channel_util:new_channel_dict(),
+                   server_properties}).
 
 -record(nc_closing, {reason,
                      close,
@@ -402,7 +403,7 @@ do_handshake(State0 = #nc_state{sock = Sock}) ->
 
 network_handshake(State = #nc_state{channel0_writer_pid = Writer0,
                                     params = Params}) ->
-    #'connection.start'{} = handshake_recv(State),
+    #'connection.start'{server_properties = ServerProps} = handshake_recv(State),
     amqp_channel_util:do(network, Writer0, start_ok(State), none),
     #'connection.tune'{channel_max = ChannelMax,
                        frame_max = FrameMax,
@@ -423,7 +424,9 @@ network_handshake(State = #nc_state{channel0_writer_pid = Writer0,
     MaxChannelNumber = if ChannelMax =:= 0 -> ?MAX_CHANNEL_NUMBER;
                           true             -> ChannelMax
                        end,
-    State#nc_state{max_channel = MaxChannelNumber, heartbeat = Heartbeat}.
+    State#nc_state{max_channel = MaxChannelNumber,
+                   heartbeat = Heartbeat,
+                   server_properties = ServerProps}.
 
 start_ok(#nc_state{params = #amqp_params{username = Username,
                                          password = Password}}) ->
