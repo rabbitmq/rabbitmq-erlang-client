@@ -57,7 +57,12 @@ init(AmqpParams = #amqp_params{username = User,
     rabbit_access_control:check_vhost_access(#user{username = User,
                                                    password = Pass},
                                              VHost),
-    {ok, #dc_state{params = AmqpParams}}.
+    State0 = #dc_state{params = AmqpParams},
+    ?LOG_DEBUG("Spawned direct connection process (~p).~n"
+               "    AmqpParams= ~p~n"
+               "    InitialState= ~p~n",
+               [self(), AmqpParams, State0]),
+    {ok, State0}.
 
 %% Standard handling of an app initiated command
 handle_call({command, Command}, From, #dc_state{closing = Closing} = State) ->
@@ -83,7 +88,10 @@ handle_info({shutdown, Reason}, State) ->
 handle_info({'EXIT', Pid, Reason}, State) ->
     handle_exit(Pid, Reason, State).
 
-terminate(_Reason, _State) ->
+terminate(Reason, _State) ->
+    ?LOG_DEBUG("Direct connection process (~p): terminating~n"
+               "    Reason=~p~n",
+               [self(), Reason]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -127,6 +135,7 @@ handle_command({close, Close}, From, State) ->
 set_closing_state(ChannelCloseType, Closing,
                   #dc_state{closing = false,
                             channels = Channels} = State) ->
+    log_set_closing_state(ChannelCloseType, Closing, State),
     amqp_channel_util:broadcast_to_channels(
         {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
         Channels),
@@ -135,6 +144,7 @@ set_closing_state(ChannelCloseType, Closing,
 set_closing_state(ChannelCloseType, NewClosing,
                   #dc_state{closing = CurClosing,
                             channels = Channels} = State) ->
+    log_set_closing_state(ChannelCloseType, NewClosing, State),
     %% Do not override reason in channels (because it might cause channels to
     %% to exit with different reasons) but do cause them to close abruptly
     %% if the new closing type requires it
@@ -156,6 +166,13 @@ set_closing_state(ChannelCloseType, NewClosing,
                CurClosing
        end,
    State#dc_state{closing = ResClosing}.
+
+log_set_closing_state(ChannelCloseType, Closing, State) ->
+    ?LOG_DEBUG("Direct connection process (~p): setting closing state~n"
+               "    ChannelCloseType= ~p~n"
+               "    Closing= ~p~n"
+               "    CurrentState= ~p~n",
+               [self(), ChannelCloseType, Closing, State]).
 
 %% The all_channels_closed_event is called when all channels have been closed
 %% after the connection broadcasts a connection_closing message to all channels

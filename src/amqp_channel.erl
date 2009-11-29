@@ -256,11 +256,18 @@ resolve_consumer(ConsumerTag, #c_state{consumers = Consumers}) ->
 register_consumer(ConsumerTag, Consumer,
                   State = #c_state{consumers = Consumers0}) ->
     Consumers1 = dict:store(ConsumerTag, Consumer, Consumers0),
+    ?LOG_DEBUG("Channel process (~p): registered consumer"
+               "    Consumer= ~p~n"
+               "    ConsumerTag= ~p~n",
+               [self(), Consumer, ConsumerTag]),
     State#c_state{consumers = Consumers1}.
 
 unregister_consumer(ConsumerTag,
                     State = #c_state{consumers = Consumers0}) ->
     Consumers1 = dict:erase(ConsumerTag, Consumers0),
+    ?LOG_DEBUG("Channel process (~p): unregistered consumer"
+               "    ConsumerTag= ~p~n",
+               [self(), ConsumerTag]),
     State#c_state{consumers = Consumers1}.
 
 amqp_msg(none) ->
@@ -399,6 +406,13 @@ init({ParentConnection, ChannelNumber, Driver, StartArgs}) ->
                             driver = Driver,
                             reader_pid = ReaderPid,
                             writer_pid = WriterPid},
+    ?LOG_DEBUG("Spawned ~p channel process (~p).~n"
+               "    ChannelNumber= ~p~n"
+               "    ParentConnection= ~p~n"
+               "    StartArgs= ~p~n"
+               "    InitialState= ~p~n",
+               [Driver, self(), ChannelNumber, ParentConnection, StartArgs,
+                InitialState]),
     {ok, InitialState}.
 
 %% Standard implementation of the call/{2,3} command
@@ -518,6 +532,10 @@ handle_info({shutdown, FailShutdownReason, InitialReason},
 handle_info({connection_closing, CloseType, Reason},
             #c_state{rpc_requests = RpcQueue,
                      closing = Closing} = State) ->
+    ?LOG_DEBUG("Channel process (~p): received connection_closing signal~n"
+               "    CloseType= ~p~n"
+               "    Reason= ~p~n",
+               [self(), CloseType, Reason]),
     case {CloseType, Closing, queue:is_empty(RpcQueue)} of
         {flush, false, false} ->
             erlang:send_after(?TIMEOUT_FLUSH, self(),
@@ -606,11 +624,15 @@ handle_info({'EXIT', Pid, Reason}, State = #c_state{number = ChannelNumber}) ->
 %%---------------------------------------------------------------------------
 
 %% @private
-terminate(_Reason, #c_state{driver = Driver,
+terminate(Reason, #c_state{driver = Driver,
                            reader_pid = ReaderPid,
                            writer_pid = WriterPid}) ->
     amqp_channel_util:terminate_channel_infrastructure(
-        Driver, {ReaderPid, WriterPid}).
+        Driver, {ReaderPid, WriterPid}),
+    ?LOG_DEBUG("Channel process (~p): terminating~n"
+               "    Reason= ~p~n",
+               [self(), Reason]),
+    ok.
 
 %% @private
 code_change(_OldVsn, State, _Extra) ->

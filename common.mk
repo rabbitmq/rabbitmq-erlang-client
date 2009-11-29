@@ -97,7 +97,9 @@ ifndef USE_SPECS
 export USE_SPECS=$(shell if [ $$(erl -noshell -eval 'io:format(erlang:system_info(version)), halt().') \> "5.7.1" ]; then echo "true"; else echo "false"; fi)
 endif
 
-ERLC_OPTS=-I $(INCLUDE_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(shell [ $(USE_SPECS) = "true" ] && echo "-Duse_specs")
+export DEFINE_DEBUG_OUTPUT=$(shell if [ -n "$(DEBUG_OUTPUT)" ]; then echo "-Denable_debug_output"; else echo ""; fi)
+
+ERLC_OPTS=-I $(INCLUDE_DIR) -o $(EBIN_DIR) -Wall -v +debug_info $(DEFINE_DEBUG_OUTPUT) $(shell [ $(USE_SPECS) = "true" ] && echo "-Duse_specs")
 
 RABBITMQ_NODENAME=rabbit
 PA_LOAD_PATH=-pa $(realpath $(LOAD_PATH))

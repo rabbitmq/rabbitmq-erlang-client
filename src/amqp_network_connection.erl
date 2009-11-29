@@ -59,6 +59,10 @@
 init(AmqpParams) ->
     process_flag(trap_exit, true),
     State0 = handshake(#nc_state{params = AmqpParams}),
+    ?LOG_DEBUG("Spawned network connection process (~p).~n"
+               "    AmqpParams= ~p~n"
+               "    InitialState= ~p~n",
+               [self(), AmqpParams, State0]),
     {ok, State0}.
 
 %% Standard handling of an app initiated command
@@ -85,7 +89,7 @@ handle_info(timeout_waiting_for_close_ok = Msg,
 handle_info({'EXIT', Pid, Reason}, State) ->
     handle_exit(Pid, Reason, State).
 
-terminate(_Reason, #nc_state{channel0_framing_pid = Framing0Pid,
+terminate(Reason, #nc_state{channel0_framing_pid = Framing0Pid,
                              channel0_writer_pid = Writer0Pid,
                              main_reader_pid = MainReaderPid}) ->
     ok = amqp_channel_util:terminate_channel_infrastructure(
@@ -94,7 +98,11 @@ terminate(_Reason, #nc_state{channel0_framing_pid = Framing0Pid,
         undefined -> ok;
         _         -> MainReaderPid ! close,
                      ok
-    end.
+    end,
+    ?LOG_DEBUG("Network connection process (~p): terminating~n"
+               "    Reason= ~p~n",
+               [self(), Reason]),
+    ok.
 
 code_change(_OldVsn, State, _Extra) ->
     State.
@@ -176,6 +184,7 @@ handle_method(#'connection.close_ok'{}, none,
 set_closing_state(ChannelCloseType, Closing, 
                   #nc_state{closing = false,
                             channels = Channels} = State) ->
+    log_set_closing_state(ChannelCloseType, Closing, State),
     amqp_channel_util:broadcast_to_channels(
         {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
         Channels),
@@ -184,6 +193,7 @@ set_closing_state(ChannelCloseType, Closing,
 set_closing_state(ChannelCloseType, NewClosing,
                   #nc_state{closing = CurClosing,
                             channels = Channels} = State) ->
+    log_set_closing_state(ChannelCloseType, NewClosing, State),
     %% Do not override reason in channels (because it might cause channels to
     %% to exit with different reasons) but do cause them to close abruptly
     %% if the new closing type requires it
@@ -216,6 +226,13 @@ set_closing_state(ChannelCloseType, NewClosing,
         server_initiated_close -> all_channels_closed_event(NewState);
         _                      -> NewState
     end.
+
+log_set_closing_state(ChannelCloseType, Closing, State) ->
+    ?LOG_DEBUG("Network connection process (~p): setting closing state~n"
+               "    ChannelCloseType= ~p~n"
+               "    Closing= ~p~n"
+               "    CurrentState= ~p~n",
+               [self(), ChannelCloseType, Closing, State]).
 
 %% The all_channels_closed_event is called when all channels have been closed
 %% after the connection broadcasts a connection_closing message to all channels
@@ -417,9 +434,11 @@ network_handshake(State = #nc_state{channel0_writer_pid = Writer0,
     #'connection.tune_ok'{channel_max = ChannelMax,
                           frame_max   = FrameMax,
                           heartbeat   = Heartbeat} = TuneOk,
-    ?LOG_INFO("Negotiated maximums: (Channel = ~p, "
-              "Frame= ~p, Heartbeat=~p)~n",
-             [ChannelMax, FrameMax, Heartbeat]),
+    ?LOG_DEBUG("Network connection process (~p): negotiated maximums~n"
+               "    ChannelMax= ~p~n"
+               "    FrameMax= ~p~n"
+               "    Heartbeat= ~p~n",
+               [self(), ChannelMax, FrameMax, Heartbeat]),
     State#nc_state{max_channel = ChannelMax, heartbeat = Heartbeat}.
 
 check_version(#'connection.start'{version_major = ?PROTOCOL_VERSION_MAJOR,

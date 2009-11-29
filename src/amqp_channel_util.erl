@@ -49,6 +49,10 @@ open_channel(ProposedNumber, MaxChannel, Driver, StartArgs, Channels) ->
         amqp_channel, {self(), ChannelNumber, Driver, StartArgs}, []),
     #'channel.open_ok'{} = amqp_channel:call(ChannelPid, #'channel.open'{}),
     NewChannels = register_channel(ChannelNumber, ChannelPid, Channels),
+    ?LOG_DEBUG("Process (~p) started channel (~p) with number ~p.~n"
+               "    Driver= ~p~n"
+               "    StartArgs= ~p~n",
+               [self(), ChannelPid, ChannelNumber, Driver, StartArgs]),
     {ChannelPid, NewChannels}.
 
 %%---------------------------------------------------------------------------
@@ -72,20 +76,38 @@ start_channel_infrastructure(network, ChannelNumber, {Sock, MainReader}) ->
                     erlang:error(main_reader_died_while_registering_framing)
             end
     end,
+    log_start_channel_infrastructure(network, ChannelNumber,
+                                     {FramingPid, WriterPid}),
     {FramingPid, WriterPid};
 start_channel_infrastructure(
         direct, ChannelNumber, #amqp_params{username = User,
                                             virtual_host = VHost}) ->
     Peer = rabbit_channel:start_link(ChannelNumber, self(), self(), User, VHost),
+    log_start_channel_infrastructure(direct, ChannelNumber, {Peer, Peer}),
     {Peer, Peer}.
 
+log_start_channel_infrastructure(Driver, ChannelNumber, {Reader, Writer}) ->
+    ?LOG_DEBUG("Started ~p channel infrastructure for process (~p).~n"
+               "    ChannelNumber= ~p~n"
+               "    Reader/Framing= ~p~n"
+               "    Writer= ~p~n",
+               [Driver, self(), ChannelNumber, Reader, Writer]).
+    
 terminate_channel_infrastructure(network, {FramingPid, WriterPid}) ->
+    log_terminate_channel_infrastructure(network, {FramingPid, WriterPid}),
     rabbit_framing_channel:shutdown(FramingPid),
     rabbit_writer:shutdown(WriterPid),
     ok;
 terminate_channel_infrastructure(direct, {Peer, Peer})->
+    log_terminate_channel_infrastructure(direct, {Peer, Peer}),
     gen_server2:cast(Peer, terminate),
     ok.
+
+log_terminate_channel_infrastructure(Driver, {Reader, Writer}) ->
+    ?LOG_DEBUG("Process (~p) terminating ~p channel infrastructure.~n"
+               "    Reader/Framing= ~p~n"
+               "    Writer= ~p~n",
+               [self(), Driver, Reader, Writer]).
 
 %%---------------------------------------------------------------------------
 %% Do

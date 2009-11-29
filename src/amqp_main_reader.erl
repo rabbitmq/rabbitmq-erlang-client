@@ -34,13 +34,18 @@
                    framing_channels = amqp_channel_util:new_channel_dict()}).
 
 start(Sock, Framing0Pid) ->
-    spawn_link(
+    Pid = spawn_link(
         fun() ->
             State0 = #mr_state{sock = Sock},
             State1 = register_framing_channel(0, Framing0Pid, none, State0),
             {ok, _Ref} = rabbit_net:async_recv(Sock, 7, infinity),
             main_loop(State1)
-        end).
+        end),
+    ?LOG_DEBUG("Process (~p) started main reader (~p).~n"
+               "    Framing0= ~p~n"
+               "    Sock= ~p~n",
+               [self(), Pid, Framing0Pid, Sock]),
+    Pid.
 
 main_loop(State = #mr_state{sock = Sock}) ->
     receive
@@ -130,21 +135,30 @@ register_framing_channel(Number, Pid, Caller,
         none -> ok;
         _    -> Caller ! registered_framing_channel
     end,
+    ?LOG_DEBUG("Main reader (~p): registered framing channel.~n"
+               "    FramingPid= ~p~n"
+               "    ChannelNumber= ~p~n",
+               [self(), Pid, Number]),
     State#mr_state{framing_channels = NewChannels}.
+
+unregister_framing_channel(Pid,
+                           State = #mr_state{framing_channels = Channels}) ->
+    NewChannels = amqp_channel_util:unregister_channel_pid(Pid, Channels),
+    ?LOG_DEBUG("Main reader (~p): unregistered framing channel.~n"
+               "    FramingPid= ~p~n",
+               [self(), Pid]),
+    State#mr_state{framing_channels = NewChannels}.
+
 
 handle_down({'DOWN', _MonitorRef, process, Pid, Info},
             State = #mr_state{framing_channels = Channels}) ->
     case amqp_channel_util:is_channel_pid_registered(Pid, Channels) of
-        true ->
-            NewChannels =
-                amqp_channel_util:unregister_channel_pid(Pid, Channels),
-            State#mr_state{framing_channels = NewChannels};
-        false ->
-            ?LOG_WARN("Reader received unexpected DOWN signal from (~p)."
-                      "Info: ~p~n", [Pid, Info]),
-            exit({unexpected_down, Pid, Info})
+        true  -> unregister_framing_channel(Pid, State);
+        false -> exit({unexpected_down, Pid, Info})
     end.
 
 close(#mr_state{sock = Sock}) ->
     rabbit_net:close(Sock),
+    ?LOG_DEBUG("Main reader (~p) closed sock ~p and is exiting~n",
+               [self(), Sock]),
     exit(normal).
