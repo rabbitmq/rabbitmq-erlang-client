@@ -26,6 +26,7 @@
 -module(amqp_direct_connection).
 
 -include("amqp_client.hrl").
+-include("amqp_connection_util.hrl").
 
 -behaviour(gen_server).
 
@@ -130,7 +131,8 @@ set_closing_state(ChannelCloseType, Closing,
     amqp_channel_util:broadcast_to_channels(
         {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
         Channels),
-    check_trigger_all_channels_closed_event(State#dc_state{closing = Closing});
+    ?UTIL2(check_trigger_all_channels_closed_event, [],
+           State#dc_state{closing = Closing});
 %% Already closing, override situation
 set_closing_state(ChannelCloseType, NewClosing,
                   #dc_state{closing = CurClosing,
@@ -159,13 +161,13 @@ set_closing_state(ChannelCloseType, NewClosing,
 
 %% The all_channels_closed_event is called when all channels have been closed
 %% after the connection broadcasts a connection_closing message to all channels
-all_channels_closed_event(#dc_state{closing = Closing} = State) ->
+all_channels_closed_event(none, Closing) ->
     case Closing#dc_closing.from of
         none -> ok;
         From -> gen_server:reply(From, ok)
     end,
     self() ! {shutdown, closing_to_reason(Closing)},
-    State.
+    Closing.
 
 closing_to_reason(#dc_closing{reason = Reason,
                               close = #'connection.close'{reply_code = Code,
@@ -182,35 +184,31 @@ internal_error_closing() ->
                 reply = {internal_error, ?INTERNAL_ERROR, <<>>}}.
 
 %%---------------------------------------------------------------------------
-%% Channel utilities
+%% amqp_connection_util related functions
 %%---------------------------------------------------------------------------
 
-unregister_channel(Pid, State = #dc_state{channels = Channels}) ->
-    NewChannels = amqp_channel_util:unregister_channel_pid(Pid, Channels),
-    NewState = State#dc_state{channels = NewChannels},
-    check_trigger_all_channels_closed_event(NewState).
+gen_c_state(#dc_state{channels = Channels, closing = Closing}) ->
+    #gen_c_state{channels = Channels,
+                 closing = Closing,
+                 all_channels_closed_event_handler =
+                     fun all_channels_closed_event/2,
+                 all_channels_closed_event_params = none}.
 
-check_trigger_all_channels_closed_event(#dc_state{closing = false} = State) ->
-    State;
-check_trigger_all_channels_closed_event(
-        #dc_state{channels = Channels} = State) ->
-    case amqp_channel_util:is_channel_dict_empty(Channels) of
-        true  -> all_channels_closed_event(State);
-        false -> State
-    end.
+from_gen_c_state(#gen_c_state{channels = Channels, closing = Closing}, State) ->
+    State#dc_state{channels = Channels, closing = Closing}.
 
 %%---------------------------------------------------------------------------
 %% Trap exits
 %%---------------------------------------------------------------------------
 
 %% Standard handling of exit signals
-handle_exit(Pid, Reason,
-            #dc_state{channels = Channels, closing = Closing} = State) ->
-    case amqp_channel_util:handle_exit(Pid, Reason, Channels, Closing) of
+handle_exit(Pid, Reason, State) ->
+    case ?UTIL(handle_exit, [Pid, Reason], State) of
         stop   -> {stop, Reason, State};
-        normal -> {noreply, unregister_channel(Pid, State)};
-        close  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              unregister_channel(Pid, State))};
-        other  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              State)}
+        normal -> {noreply, ?UTIL2(unregister_channel, [Pid], State)};
+        close  -> {noreply,
+                   set_closing_state(abrupt, internal_error_closing(),
+                                     ?UTIL2(unregister_channel, [Pid], State))};
+        other  -> {noreply,
+                   set_closing_state(abrupt, internal_error_closing(), State)}
     end.

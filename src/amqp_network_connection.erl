@@ -26,6 +26,7 @@
 -module(amqp_network_connection).
 
 -include("amqp_client.hrl").
+-include("amqp_connection_util.hrl").
 
 -behaviour(gen_server).
 
@@ -179,7 +180,8 @@ set_closing_state(ChannelCloseType, Closing,
     amqp_channel_util:broadcast_to_channels(
         {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
         Channels),
-    check_trigger_all_channels_closed_event(State#nc_state{closing = Closing});
+    ?UTIL2(check_trigger_all_channels_closed_event, [],
+           State#nc_state{closing = Closing});
 %% Already closing, override situation
 set_closing_state(ChannelCloseType, NewClosing,
                   #nc_state{closing = CurClosing,
@@ -213,15 +215,14 @@ set_closing_state(ChannelCloseType, NewClosing,
     %% send connection.close_ok (it might be even be the case that we are
     %% sending it again) and wait for the socket to close.
     case NewReason of
-        server_initiated_close -> all_channels_closed_event(NewState);
+        server_initiated_close -> ?UTIL2(check_trigger_channel_closed_event, [],
+                                         NewState);
         _                      -> NewState
     end.
 
 %% The all_channels_closed_event is called when all channels have been closed
 %% after the connection broadcasts a connection_closing message to all channels
-all_channels_closed_event(#nc_state{channel0_writer_pid = Writer0,
-                                    main_reader_pid = MainReader,
-                                    closing = Closing} = State) ->
+all_channels_closed_event({Writer0, MainReader}, Closing) ->
     #nc_closing{reason = Reason, close = Close} = Closing,
     case Reason of
         server_initiated_close ->
@@ -229,13 +230,12 @@ all_channels_closed_event(#nc_state{channel0_writer_pid = Writer0,
                                  none),
             erlang:send_after(?SOCKET_CLOSING_TIMEOUT, MainReader,
                               socket_closing_timeout),
-            State#nc_state{closing =
-                Closing#nc_closing{phase = wait_socket_close}};
+            Closing#nc_closing{phase = wait_socket_close};
         _ ->
             amqp_channel_util:do(network, Writer0, Close, none),
             erlang:send_after(?CLIENT_CLOSE_TIMEOUT, self(),
                               timeout_waiting_for_close_ok),
-            State#nc_state{closing = Closing#nc_closing{phase = wait_close_ok}}
+            Closing#nc_closing{phase = wait_close_ok}
     end.
 
 closing_to_reason(#nc_closing{reason = Reason,
@@ -251,23 +251,22 @@ internal_error_closing() ->
                                             method_id = 0}}.
 
 %%---------------------------------------------------------------------------
-%% Channel utilities
+%% amqp_connection_util related functions
 %%---------------------------------------------------------------------------
 
-unregister_channel(Pid, State = #nc_state{channels = Channels}) ->
-    NewChannels = amqp_channel_util:unregister_channel_pid(Pid, Channels),
-    NewState = State#nc_state{channels = NewChannels},
-    check_trigger_all_channels_closed_event(NewState).
+gen_c_state(#nc_state{channels = Channels,
+                      closing = Closing,
+                      channel0_writer_pid = Writer0,
+                      main_reader_pid = MainReader}) ->
+    #gen_c_state{channels = Channels,
+                 closing = Closing,
+                 all_channels_closed_event_handler =
+                     fun all_channels_closed_event/2,
+                 all_channels_closed_event_params = {Writer0, MainReader}}.
 
-check_trigger_all_channels_closed_event(#nc_state{closing = false} = State) ->
-    State;
-check_trigger_all_channels_closed_event(#nc_state{channels = Channels,
-                                                  closing = Closing} = State) ->
-    #nc_closing{phase = terminate_channels} = Closing, % assertion
-    case amqp_channel_util:is_channel_dict_empty(Channels) of
-        true  -> all_channels_closed_event(State);
-        false -> State
-    end.
+from_gen_c_state(#gen_c_state{channels = Channels,
+                              closing = Closing}, State) ->
+    State#nc_state{channels = Channels, closing = Closing}.
 
 %%---------------------------------------------------------------------------
 %% Trap exits
@@ -314,15 +313,15 @@ handle_exit(MainReaderPid, Reason,
     end;
 
 %% Handle exit from channel or other pid
-handle_exit(Pid, Reason,
-            #nc_state{channels = Channels, closing = Closing} = State) ->
-    case amqp_channel_util:handle_exit(Pid, Reason, Channels, Closing) of
+handle_exit(Pid, Reason, State) ->
+    case ?UTIL(handle_exit, [Pid, Reason], State) of
         stop   -> {stop, Reason, State};
-        normal -> {noreply, unregister_channel(Pid, State)};
-        close  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              unregister_channel(Pid, State))};
-        other  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              State)}
+        normal -> {noreply, ?UTIL2(unregister_channel, [Pid], State)};
+        close  -> {noreply,
+                   set_closing_state(abrupt, internal_error_closing(),
+                                     ?UTIL2(unregister_channel, [Pid], State))};
+        other  -> {noreply,
+                   set_closing_state(abrupt, internal_error_closing(), State)}
     end.
 
 %%---------------------------------------------------------------------------
