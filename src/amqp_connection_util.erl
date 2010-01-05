@@ -29,7 +29,9 @@
 -include("amqp_connection_util.hrl").
 
 -export([handle_exit/3]).
--export([check_trigger_all_channels_closed_event/1, unregister_channel/2]).
+-export([check_trigger_all_channels_closed_event/1, unregister_channel/2,
+         broadcast_closing_if_abrupt/3, set_initial_closing/4,
+         handle_open_channel/5]).
 
 %%---------------------------------------------------------------------------
 %% Generic handling of exits
@@ -91,3 +93,29 @@ unregister_channel(Pid, #gen_c_state{channels = Channels} = State) ->
     NewChannels = amqp_channel_util:unregister_channel_pid(Pid, Channels),
     NewState = State#gen_c_state{channels = NewChannels},
     check_trigger_all_channels_closed_event(NewState).
+
+broadcast_closing_if_abrupt(ChannelCloseType, Reason,
+                            #gen_c_state{channels = Channels}) ->
+    case ChannelCloseType of
+        abrupt -> amqp_channel_util:broadcast_to_channels(
+                      {connection_closing, ChannelCloseType, Reason}, Channels);
+        _      -> ok
+    end.
+
+set_initial_closing(ChannelCloseType, Closing, Reason,
+                    #gen_c_state{channels = Channels} = State) ->
+    amqp_channel_util:broadcast_to_channels(
+        {connection_closing, ChannelCloseType, Reason}, Channels),
+    NewState = State#gen_c_state{closing = Closing},
+    check_trigger_all_channels_closed_event(NewState).
+
+handle_open_channel(ProposedNumber, MaxChannel, Driver, Params,
+                    #gen_c_state{channels = Channels} = State) ->
+    try amqp_channel_util:open_channel(ProposedNumber, MaxChannel, Driver,
+                                       Params, Channels) of
+        {ChannelPid, NewChannels} ->
+            {reply, ChannelPid, State#gen_c_state{channels = NewChannels}}
+    catch
+        error:out_of_channel_numbers = Error ->
+            {reply, {Error, MaxChannel}, State}
+    end.

@@ -107,18 +107,13 @@ code_change(_OldVsn, State, _Extra) ->
 handle_command({open_channel, ProposedNumber}, _From,
                State = #nc_state{sock = Sock,
                                  main_reader_pid = MainReader,
-                                 channels = Channels,
                                  max_channel = MaxChannel}) ->
-    try amqp_channel_util:open_channel(ProposedNumber, MaxChannel, network,
-                                       {Sock, MainReader}, Channels) of
-        {ChannelPid, NewChannels} ->
-            {reply, ChannelPid, State#nc_state{channels = NewChannels}}
-    catch
-        error:out_of_channel_numbers = Error ->
-            {reply, {Error, MaxChannel}, State}
-    end;
+    {reply, Msg, GenState} =
+        ?UTIL(handle_open_channel,
+              [ProposedNumber, MaxChannel, network, {Sock, MainReader}], State),
+    {reply, Msg, from_gen_c_state(GenState, State)};
 
-handle_command({close, #'connection.close'{} = Close}, From, State) ->
+handle_command({close, Close}, From, State) ->
     {noreply, set_closing_state(flush, #nc_closing{reason = app_initiated_close,
                                                    close = Close,
                                                    from = From},
@@ -151,9 +146,7 @@ handle_method(#'connection.close_ok'{}, none,
 %%---------------------------------------------------------------------------
 
 %% Changes connection's state to closing.
-%%
-%% ChannelCloseType can be flush or abrupt
-%%
+%% ChannelCloseType can be flush or abrupt.
 %% The closing reason (Closing#nc_closing.reason) can be one of the following
 %%     app_initiated_close - app has invoked the close/{1,3} command. In this
 %%         case the close field is the method to be sent to the server after all
@@ -168,35 +161,23 @@ handle_method(#'connection.close_ok'{}, none,
 %%     server_initiated_close - server has sent 'connection.close'. close field
 %%         is the method sent by the server.
 %%         phase = terminate_channels | wait_socket_close
-%%
+set_closing_state(ChannelCloseType, Closing, 
+                  #nc_state{closing = false} = State) ->
+    ?UTIL2(set_initial_closing,
+           [ChannelCloseType, Closing, closing_to_reason(Closing)], State);
+%% Already closing, override situation.
 %% The precedence of the closing MainReason's is as follows:
 %%     app_initiated_close, internal_error, server_initiated_close
 %% (i.e.: a given reason can override the currently set one if it is later
 %% mentioned in the above list). We can rely on erlang's comparison of atoms
 %% for this.
-set_closing_state(ChannelCloseType, Closing, 
-                  #nc_state{closing = false,
-                            channels = Channels} = State) ->
-    amqp_channel_util:broadcast_to_channels(
-        {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
-        Channels),
-    ?UTIL2(check_trigger_all_channels_closed_event, [],
-           State#nc_state{closing = Closing});
-%% Already closing, override situation
 set_closing_state(ChannelCloseType, NewClosing,
-                  #nc_state{closing = CurClosing,
-                            channels = Channels} = State) ->
+                  #nc_state{closing = CurClosing} = State) ->
     %% Do not override reason in channels (because it might cause channels to
     %% to exit with different reasons) but do cause them to close abruptly
     %% if the new closing type requires it
-    case ChannelCloseType of
-        abrupt ->
-            amqp_channel_util:broadcast_to_channels(
-                {connection_closing, ChannelCloseType,
-                 closing_to_reason(CurClosing)},
-                Channels);
-        _ -> ok
-   end,
+    ?UTIL(broadcast_closing_if_abrupt,
+          [ChannelCloseType, closing_to_reason(CurClosing)], State),
    #nc_closing{reason = NewReason, close = NewClose} = NewClosing,
    #nc_closing{reason = CurReason} = CurClosing,
    ResClosing =
@@ -212,7 +193,7 @@ set_closing_state(ChannelCloseType, NewClosing,
     NewState = State#nc_state{closing = ResClosing},
     %% Now check if it's the case that the server has sent a connection.close
     %% while we were in the closing state (for whatever reason). We need to
-    %% send connection.close_ok (it might be even be the case that we are
+    %% send connection.close_ok (it might even be the case that we are
     %% sending it again) and wait for the socket to close.
     case NewReason of
         server_initiated_close -> ?UTIL2(check_trigger_channel_closed_event, [],

@@ -95,16 +95,11 @@ code_change(_OldVsn, State, _Extra) ->
 %%---------------------------------------------------------------------------
 
 handle_command({open_channel, ProposedNumber}, _From,
-               State = #dc_state{params = Params,
-                                 channels = Channels}) ->
-    try amqp_channel_util:open_channel(ProposedNumber, ?MAX_CHANNEL_NUMBER,
-                                       direct, Params, Channels) of
-        {ChannelPid, NewChannels} ->
-            {reply, ChannelPid, State#dc_state{channels = NewChannels}}
-    catch
-        error:out_of_channel_numbers = Error ->
-            {reply, {Error, ?MAX_CHANNEL_NUMBER}, State}
-    end;
+               State = #dc_state{params = Params}) ->
+    {reply, Msg, GenState} =
+        ?UTIL(handle_open_channel,
+              [ProposedNumber, ?MAX_CHANNEL_NUMBER, direct, Params], State),
+    {reply, Msg, from_gen_c_state(GenState, State)};
 
 handle_command({close, Close}, From, State) ->
     {noreply, set_closing_state(flush, #dc_closing{reason = app_initiated_close,
@@ -117,37 +112,24 @@ handle_command({close, Close}, From, State) ->
 %%---------------------------------------------------------------------------
 
 %% Changes connection's state to closing.
-%%
-%% ChannelCloseType can be flush or abrupt
-%%
+%% ChannelCloseType can be flush or abrupt.
+set_closing_state(ChannelCloseType, Closing,
+                  #dc_state{closing = false} = State) ->
+    ?UTIL2(set_initial_closing,
+          [ChannelCloseType, Closing, closing_to_reason(Closing)], State);
+%% Already closing, override situation.
 %% The precedence of the closing MainReason's is as follows:
 %%     app_initiated_close, internal_error, server_initiated_close
 %% (i.e.: a given reason can override the currently set one if it is later
 %% mentioned in the above list). We can rely on erlang's comparison of atoms
 %% for this.
-set_closing_state(ChannelCloseType, Closing,
-                  #dc_state{closing = false,
-                            channels = Channels} = State) ->
-    amqp_channel_util:broadcast_to_channels(
-        {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
-        Channels),
-    ?UTIL2(check_trigger_all_channels_closed_event, [],
-           State#dc_state{closing = Closing});
-%% Already closing, override situation
 set_closing_state(ChannelCloseType, NewClosing,
-                  #dc_state{closing = CurClosing,
-                            channels = Channels} = State) ->
+                  #dc_state{closing = CurClosing} = State) ->
     %% Do not override reason in channels (because it might cause channels to
     %% to exit with different reasons) but do cause them to close abruptly
     %% if the new closing type requires it
-    case ChannelCloseType of
-        abrupt ->
-            amqp_channel_util:broadcast_to_channels(
-                {connection_closing, ChannelCloseType,
-                 closing_to_reason(CurClosing)},
-                Channels);
-        _ -> ok
-   end,
+    ?UTIL(broadcast_closing_if_abrupt,
+          [ChannelCloseType, closing_to_reason(CurClosing)], State),
    ResClosing =
        if
            %% Override (rely on erlang's comparison of atoms)
