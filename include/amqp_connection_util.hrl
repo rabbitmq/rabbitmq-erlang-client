@@ -31,7 +31,8 @@
 
 
 %% Macros to call amqp_connection_util functions that require a #gen_c_state{}.
-%% The second version is for functions that also return a #gen_c_state{}.
+%% The second version is for functions that return a #gen_c_state{} - converts
+%% it back to #dc_state{} or #nc_state{}.
 %% These macros require gen_c_state and from_gen_c_state functions defined in
 %% the current module.
 -define(UTIL(Func, Params, State),
