@@ -274,33 +274,45 @@ shutdown_with_reason({_, 200, _}, State) ->
 shutdown_with_reason(Reason, State) ->
     {stop, Reason, State}.
 
+is_connection_method(Method) ->
+    lists:prefix("connection.", atom_to_list(element(1, Method))).
+
 %%---------------------------------------------------------------------------
 %% Handling of methods from the server
 %%---------------------------------------------------------------------------
 
 handle_method(Method, Content, #c_state{closing = Closing} = State) ->
-    case {Method, Content} of
-        %% Handle 'channel.close': send 'channel.close_ok' and stop channel
-        {#'channel.close'{reply_code = ReplyCode,
-                          reply_text = ReplyText}, none} ->
-            do(#'channel.close_ok'{}, none, State),
-            {stop, {server_initiated_close, ReplyCode, ReplyText}, State};
-        %% Handle 'channel.close_ok': stop channel
-        {CloseOk = #'channel.close_ok'{}, none} ->
-            {stop, normal, rpc_bottom_half(CloseOk, State)};
-        _ ->
-            case Closing of
-                %% Drop all incomming traffic except 'channel.close' and
-                %% 'channel.close_ok' when channel is closing (has sent
-                %% 'channel.close')
-                just_channel ->
-                    ?LOG_INFO("Channel (~p): dropping method ~p from server "
-                              "because channel is closing~n",
-                              [self(), {Method, Content}]),
-                    {noreply, State};
-                %% Standard handling of incoming method
+    case is_connection_method(Method) of
+        true ->
+            %% Die if it's a 'connection.' method
+            {stop, {command_invalid, Method}, State};
+        false ->
+            case {Method, Content} of
+                %% Handle 'channel.close': send 'channel.close_ok' and stop
+                %% channel
+                {#'channel.close'{reply_code = ReplyCode,
+                                  reply_text = ReplyText}, none} ->
+                    do(#'channel.close_ok'{}, none, State),
+                    {stop, {server_initiated_close, ReplyCode, ReplyText},
+                     State};
+                %% Handle 'channel.close_ok': stop channel
+                {CloseOk = #'channel.close_ok'{}, none} ->
+                    {stop, normal, rpc_bottom_half(CloseOk, State)};
                 _ ->
-                    handle_regular_method(Method, amqp_msg(Content), State)
+                    case Closing of
+                        %% Drop all incomming traffic except 'channel.close' and
+                        %% 'channel.close_ok' when channel is closing (has sent
+                        %% 'channel.close')
+                        just_channel ->
+                            ?LOG_INFO("Channel (~p): dropping method ~p from "
+                                      "server because channel is closing~n",
+                                      [self(), {Method, Content}]),
+                            {noreply, State};
+                        %% Standard handling of incoming method
+                        _ ->
+                            handle_regular_method(Method, amqp_msg(Content),
+                                                  State)
+                    end
             end
     end.
 

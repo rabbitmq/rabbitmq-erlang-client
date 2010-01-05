@@ -227,7 +227,7 @@ handle_exit(Pid, Reason, Channels, Closing) ->
         false -> ?LOG_WARN("Connection (~p) closing: received unexpected "
                            "exit signal from (~p). Reason: ~p~n",
                            [self(), Pid, Reason]),
-                 other
+                 {close, internal_error}
     end.
 
 handle_channel_exit(_Pid, normal, _Closing) ->
@@ -243,6 +243,11 @@ handle_channel_exit(Pid, {server_initiated_close, Code, _Text}, false) ->
                  stop;
         false -> normal
     end;
+handle_channel_exit(Pid, {command_invalid, Method}, _Closing) ->
+    %% Channel terminating due to invalid method
+    ?LOG_WARN("Connection (~p) closing: channel (~p) received invalid method ~p "
+              "from server~n", [self(), Pid, Method]),
+    {close, {command_invalid, Method}};
 handle_channel_exit(_Pid, {_CloseReason, _Code, _Text}, Closing)
   when Closing =/= false ->
     %% Channel terminating due to connection closing
@@ -252,4 +257,4 @@ handle_channel_exit(Pid, Reason, _Closing) ->
     %% the entire connection down
     ?LOG_WARN("Connection (~p) closing: channel (~p) died. Reason: ~p~n",
               [self(), Pid, Reason]),
-    close.
+    {close, internal_error}.

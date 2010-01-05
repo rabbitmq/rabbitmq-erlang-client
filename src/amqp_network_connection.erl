@@ -243,12 +243,21 @@ closing_to_reason(#nc_closing{reason = Reason,
                                                           reply_text = Text}}) ->
     {Reason, Code, Text}.
 
-internal_error_closing() ->
+internal_error_closing({Type, Method}) ->
+    Closing = internal_error_closing(Type),
+    {MethodId, ClassId} = rabbit_framing:method_id(element(1, Method)),
+    NewClose = (Closing#nc_closing.close)#'connection.close'{
+        class_id  = ClassId,
+        method_id = MethodId},
+    NewClosing = Closing#nc_closing{close = NewClose},
+    NewClosing;
+internal_error_closing(Type) ->
+    {_, Code, Text} = rabbit_framing:lookup_amqp_exception(Type),
     #nc_closing{reason = internal_error,
-                close = #'connection.close'{reply_text = <<>>,
-                                            reply_code = ?INTERNAL_ERROR,
-                                            class_id = 0,
-                                            method_id = 0}}.
+                close = #'connection.close'{reply_text = Text,
+                                            reply_code = Code,
+                                            class_id   = 0,
+                                            method_id  = 0}}.
 
 %%---------------------------------------------------------------------------
 %% Channel utilities
@@ -317,12 +326,14 @@ handle_exit(MainReaderPid, Reason,
 handle_exit(Pid, Reason,
             #nc_state{channels = Channels, closing = Closing} = State) ->
     case amqp_channel_util:handle_exit(Pid, Reason, Channels, Closing) of
-        stop   -> {stop, Reason, State};
-        normal -> {noreply, unregister_channel(Pid, State)};
-        close  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              unregister_channel(Pid, State))};
-        other  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              State)}
+        stop ->
+            {stop, Reason, State};
+        normal ->
+            {noreply, unregister_channel(Pid, State)};
+        {close, ErrorType} ->
+            {noreply,
+             set_closing_state(abrupt, internal_error_closing(ErrorType),
+                               unregister_channel(Pid, State))}
     end.
 
 %%---------------------------------------------------------------------------

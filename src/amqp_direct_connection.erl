@@ -70,7 +70,8 @@ handle_call({command, Command}, From, #dc_state{closing = Closing} = State) ->
 handle_cast(Message, State) ->
     ?LOG_WARN("Connection (~p) closing: received unexpected cast ~p~n",
               [self(), Message]),
-    {noreply, set_closing_state(abrupt, internal_error_closing(), State)}.
+    {noreply,
+     set_closing_state(abrupt, internal_error_closing(internal_error), State)}.
 
 %% Shutdown message
 handle_info({shutdown, Reason}, State) ->
@@ -177,9 +178,13 @@ closing_to_reason(#dc_closing{reason = Reason,
                               close = none}) ->
     {Reason, Code, Text}.
 
-internal_error_closing() ->
+internal_error_closing({Type, _Method}) ->
+    %% Ignore method in the direct case
+    internal_error_closing(Type);
+internal_error_closing(Type) ->
+    {_, Code, Text} = rabbit_framing:lookup_amqp_exception(Type),
     #dc_closing{reason = internal_error,
-                reply = {internal_error, ?INTERNAL_ERROR, <<>>}}.
+                reply = {Type, Code, Text}}.
 
 %%---------------------------------------------------------------------------
 %% Channel utilities
@@ -207,10 +212,12 @@ check_trigger_all_channels_closed_event(
 handle_exit(Pid, Reason,
             #dc_state{channels = Channels, closing = Closing} = State) ->
     case amqp_channel_util:handle_exit(Pid, Reason, Channels, Closing) of
-        stop   -> {stop, Reason, State};
-        normal -> {noreply, unregister_channel(Pid, State)};
-        close  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              unregister_channel(Pid, State))};
-        other  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              State)}
+        stop ->
+            {stop, Reason, State};
+        normal ->
+            {noreply, unregister_channel(Pid, State)};
+        {close, ErrorType} ->
+            {noreply,
+             set_closing_state(abrupt, internal_error_closing(ErrorType),
+                                        unregister_channel(Pid, State))}
     end.
