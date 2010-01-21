@@ -226,7 +226,7 @@ handle_exit(Pid, Reason, Channels, Closing) ->
         true ->
             case handle_channel_exit(Pid, Reason, Closing) of
                 #amqp_error{} = AmqpError ->
-                    handle_channel_amqp_error(Pid, AmqpError);
+                    handle_channel_amqp_error(Pid, AmqpError, Channels);
                 Other ->
                     Other
             end;
@@ -261,14 +261,12 @@ handle_channel_exit(_Pid, _Reason, _Closing) ->
     %% amqp_channel died with internal reason
     #amqp_error{name = internal_error}.
 
-handle_channel_amqp_error(Pid, #amqp_error{} = AmqpError) ->
-    {ShouldClose, ReplyCode, ReplyText, ClassId, MethodId} =
-        rabbit_binary_generator:amqp_exception(AmqpError),
+handle_channel_amqp_error(Pid, #amqp_error{} = AmqpError, Channels) ->
+    {ShouldClose, _, Close} =
+        rabbit_binary_generator:map_exception(resolve_channel_pid(Pid, Channels),
+                                              AmqpError),
     ?LOG_WARN("Connection (~p): channel (~p) died with ~s ~p~n", [self(), Pid,
-            if ShouldClose -> "hard"; true -> "soft" end, AmqpError]),
-    if ShouldClose -> {error, #'connection.close'{reply_code = ReplyCode,
-                                                  reply_text = ReplyText,
-                                                  class_id   = ClassId,
-                                                  method_id  = MethodId}};
+              if ShouldClose -> "hard"; true -> "soft" end, AmqpError]),
+    if ShouldClose -> {error, Close};
        true        -> normal
     end.
