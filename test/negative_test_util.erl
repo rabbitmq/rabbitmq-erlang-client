@@ -114,3 +114,35 @@ no_permission_test() ->
     Params = #amqp_params{username = <<"test_user_no_perm">>,
                           password = <<"test_user_no_perm">>},
     ?assertError(_, amqp_connection:start_network(Params)).
+
+%% Simulates a #'connection.open'{} method received on non-zero channel. The
+%% connection is expected to send a '#connection.close{}' to the server with
+%% reply code command_invalid
+command_invalid_over_channel_test(Connection, ConnectionType) ->
+    Channel = amqp_connection:open_channel(Connection),
+    MonitorRef = erlang:monitor(process, Connection),
+    case ConnectionType of
+        direct  -> Channel ! {send_command, #'connection.open'{}};
+        network -> gen_server:cast(Channel, {method, #'connection.open'{}, none})
+    end,
+    assert_die_with_code(MonitorRef, command_invalid),
+    ?assertNot(is_process_alive(Channel)),
+    ok.
+
+%% Simulates a #'basic.ack'{} method received on channel zero. The connection
+%% is expected to send a '#connection.close{}' to the server with reply code
+%% command_invalid
+command_invalid_over_channel0_test(Connection) ->
+    gen_server:cast(Connection, {method, #'basic.ack'{}, none}),
+    MonitorRef = erlang:monitor(process, Connection),
+    assert_die_with_code(MonitorRef, command_invalid),
+    ok.
+
+assert_die_with_code(MonitorRef, CodeAtom) ->
+    receive
+        {'DOWN', MonitorRef, process, _, Reason} ->
+            {_, Code, _} = Reason,
+            ?assertMatch(CodeAtom, rabbit_framing:amqp_exception(Code))
+    after 2000 ->
+        exit(did_not_die)
+    end.

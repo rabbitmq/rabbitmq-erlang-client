@@ -146,8 +146,8 @@ handle_method(#'connection.close_ok'{}, none,
     end;
 
 handle_method(OtherMethod, _, State) ->
-    {true, 0, Close} = rabbit_binary_generator:map_exception(
-        0, #amqp_error{name = command_invalid, method = OtherMethod}),
+    {true, 0, Close} = rabbit_binary_generator:map_exception(0,
+        #amqp_error{name = command_invalid, method = element(1, OtherMethod)}),
     {noreply, set_closing_state(abrupt, #nc_closing{reason = error,
                                                     close  = Close}, State)}.
 
