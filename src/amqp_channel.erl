@@ -275,7 +275,8 @@ shutdown_with_reason(Reason, State) ->
     {stop, Reason, State}.
 
 is_connection_method(Method) ->
-    lists:prefix("connection.", atom_to_list(element(1, Method))).
+    {ClassId, _} = rabbit_framing:method_id(element(1, Method)),
+    rabbit_framing:lookup_class_name(ClassId) == connection.
 
 %%---------------------------------------------------------------------------
 %% Handling of methods from the server
