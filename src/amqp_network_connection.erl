@@ -159,17 +159,16 @@ handle_method(#'connection.close_ok'{}, none,
 %%         the channels have terminated (and flushed); the from field is the
 %%         process that initiated the call and to whom the server must reply.
 %%         phase = terminate_channels | wait_close_ok
-%%     internal_error - there was an internal error either in a channel or in
-%%         the connection process. close field is the method to be sent to the
-%%         server after all channels have been abruptly terminated (do not flush
-%%         in this case).
+%%     error - there was either an internal error or the server misbehaved.
+%%         close field is the method to be sent to the server after all channels
+%%         have been abruptly terminated (do not flush in this case).
 %%         phase = terminate_channels | wait_close_ok
 %%     server_initiated_close - server has sent 'connection.close'. close field
 %%         is the method sent by the server.
 %%         phase = terminate_channels | wait_socket_close
 %%
 %% The precedence of the closing MainReason's is as follows:
-%%     app_initiated_close, internal_error, server_initiated_close
+%%     app_initiated_close, error, server_initiated_close
 %% (i.e.: a given reason can override the currently set one if it is later
 %% mentioned in the above list). We can rely on erlang's comparison of atoms
 %% for this.
@@ -243,22 +242,6 @@ closing_to_reason(#nc_closing{reason = Reason,
                                                           reply_text = Text}}) ->
     {Reason, Code, Text}.
 
-internal_error_closing({Type, Method}) ->
-    Closing = internal_error_closing(Type),
-    {MethodId, ClassId} = rabbit_framing:method_id(element(1, Method)),
-    NewClose = (Closing#nc_closing.close)#'connection.close'{
-        class_id  = ClassId,
-        method_id = MethodId},
-    NewClosing = Closing#nc_closing{close = NewClose},
-    NewClosing;
-internal_error_closing(Type) ->
-    {_, Code, Text} = rabbit_framing:lookup_amqp_exception(Type),
-    #nc_closing{reason = internal_error,
-                close = #'connection.close'{reply_text = Text,
-                                            reply_code = Code,
-                                            class_id   = 0,
-                                            method_id  = 0}}.
-
 %%---------------------------------------------------------------------------
 %% Channel utilities
 %%---------------------------------------------------------------------------
@@ -330,9 +313,10 @@ handle_exit(Pid, Reason,
             {stop, Reason, State};
         normal ->
             {noreply, unregister_channel(Pid, State)};
-        {close, ErrorType} ->
+        {error, Close} ->
             {noreply,
-             set_closing_state(abrupt, internal_error_closing(ErrorType),
+             set_closing_state(abrupt, #nc_closing{reason = error,
+                                                   close  = Close},
                                unregister_channel(Pid, State))}
     end.
 

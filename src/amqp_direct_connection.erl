@@ -70,8 +70,7 @@ handle_call({command, Command}, From, #dc_state{closing = Closing} = State) ->
 handle_cast(Message, State) ->
     ?LOG_WARN("Connection (~p) closing: received unexpected cast ~p~n",
               [self(), Message]),
-    {noreply,
-     set_closing_state(abrupt, internal_error_closing(internal_error), State)}.
+    {noreply, internal_error(State)}.
 
 %% Shutdown message
 handle_info({shutdown, Reason}, State) ->
@@ -121,7 +120,7 @@ handle_command({close, Close}, From, State) ->
 %% ChannelCloseType can be flush or abrupt
 %%
 %% The precedence of the closing MainReason's is as follows:
-%%     app_initiated_close, internal_error, server_initiated_close
+%%     app_initiated_close, error, server_initiated_close
 %% (i.e.: a given reason can override the currently set one if it is later
 %% mentioned in the above list). We can rely on erlang's comparison of atoms
 %% for this.
@@ -178,13 +177,11 @@ closing_to_reason(#dc_closing{reason = Reason,
                               close = none}) ->
     {Reason, Code, Text}.
 
-internal_error_closing({Type, _Method}) ->
-    %% Ignore method in the direct case
-    internal_error_closing(Type);
-internal_error_closing(Type) ->
-    {_, Code, Text} = rabbit_framing:lookup_amqp_exception(Type),
-    #dc_closing{reason = internal_error,
-                reply = {Type, Code, Text}}.
+internal_error(State) ->
+    {_, Code, Text} = rabbit_framing:lookup_amqp_exception(internal_error),
+    Closing = #dc_closing{reason = error,
+                          reply  = {internal_error, Code, Text}},
+    set_closing_state(abrupt, Closing, State).
 
 %%---------------------------------------------------------------------------
 %% Channel utilities
@@ -216,8 +213,9 @@ handle_exit(Pid, Reason,
             {stop, Reason, State};
         normal ->
             {noreply, unregister_channel(Pid, State)};
-        {close, ErrorType} ->
+        {error, Close} ->
             {noreply,
-             set_closing_state(abrupt, internal_error_closing(ErrorType),
-                                        unregister_channel(Pid, State))}
+             set_closing_state(abrupt, #dc_closing{reason = error,
+                                                   close  = Close},
+                               unregister_channel(Pid, State))}
     end.
