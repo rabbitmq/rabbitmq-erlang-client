@@ -29,14 +29,16 @@
 
 -export([start/2]).
 
--record(mr_state, {sock,
+-record(mr_state, {connection_pid,
+                   sock,
                    message = none, %% none | {Type, Channel, Length}
                    framing_channels = amqp_channel_util:new_channel_dict()}).
 
 start(Sock, Framing0Pid) ->
+    ConnectionPid = self(),
     spawn_link(
         fun() ->
-            State0 = #mr_state{sock = Sock},
+            State0 = #mr_state{sock = Sock, connection_pid = ConnectionPid},
             State1 = register_framing_channel(0, Framing0Pid, none, State0),
             {ok, _Ref} = rabbit_net:async_recv(Sock, 7, infinity),
             main_loop(State1)
@@ -97,9 +99,9 @@ handle_inet_async({inet_async, Sock, _, Msg},
 handle_frame(Type, Channel, Payload, State) ->
     case rabbit_reader:analyze_frame(Type, Payload) of
         heartbeat when Channel /= 0 ->
-            rabbit_misc:die(frame_error);
+            State#mr_state.connection_pid ! #amqp_error{name = command_invalid};
         trace when Channel /= 0 ->
-            rabbit_misc:die(frame_error);
+            State#mr_state.connection_pid ! #amqp_error{name = command_invalid};
         %% Match heartbeats and trace frames, but don't do anything with them
         heartbeat ->
             heartbeat;

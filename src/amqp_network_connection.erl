@@ -77,9 +77,15 @@ handle_cast({method, Method, Content}, State) ->
 %% but timed out waiting for 'connection.close_ok' back
 handle_info(timeout_waiting_for_close_ok = Msg,
             State = #nc_state{closing = Closing}) ->
-    ?LOG_WARN("Connection ~p closing: timed out waiting for"
+    ?LOG_WARN("Connection (~p) closing: timed out waiting for"
               "'connection.close_ok'.", [self()]),
     {stop, {Msg, closing_to_reason(Closing)}, State};
+
+%% This can be sent by any of auxiliary process of the connection to
+%% trigger closing with error
+handle_info(#amqp_error{} = AmqpError, State) ->
+    ?LOG_WARN("Connection (~p) closing: received ~p", [self(), AmqpError]),
+    {noreply, amqp_error(AmqpError, State)};
 
 %% Standard handling of exit signals
 handle_info({'EXIT', Pid, Reason}, State) ->
@@ -146,10 +152,8 @@ handle_method(#'connection.close_ok'{}, none,
     end;
 
 handle_method(OtherMethod, _, State) ->
-    {true, 0, Close} = rabbit_binary_generator:map_exception(0,
-        #amqp_error{name = command_invalid, method = element(1, OtherMethod)}),
-    {noreply, set_closing_state(abrupt, #nc_closing{reason = error,
-                                                    close  = Close}, State)}.
+    {noreply, amqp_error(#amqp_error{name   = command_invalid,
+                                     method = element(1, OtherMethod)}, State)}.
 
 %%---------------------------------------------------------------------------
 %% Closing
@@ -247,6 +251,11 @@ closing_to_reason(#nc_closing{reason = Reason,
                               close = #'connection.close'{reply_code = Code,
                                                           reply_text = Text}}) ->
     {Reason, Code, Text}.
+
+amqp_error(#amqp_error{} = AmqpError, State) ->
+    {true, 0, Close} = rabbit_binary_generator:map_exception(0, AmqpError),
+    set_closing_state(abrupt, #nc_closing{reason = error,
+                                          close = Close}, State).
 
 %%---------------------------------------------------------------------------
 %% Channel utilities
