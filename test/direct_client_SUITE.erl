@@ -70,6 +70,9 @@ command_serialization_test() ->
 queue_unbind_test() ->
     test_util:queue_unbind_test(new_connection()).
 
+rpc_test() ->
+    test_util:rpc_test(new_connection()).
+
 %%---------------------------------------------------------------------------
 %% This must be kicked off manually because it can only be run after Rabbit
 %% has been running for 1 minute
@@ -88,6 +91,9 @@ hard_error_test() ->
 
 bogus_rpc_test() ->
   negative_test_util:bogus_rpc_test(new_connection()).
+
+channel_death_test() ->
+    negative_test_util:channel_death_test(new_connection()).
 
 %%---------------------------------------------------------------------------
 %% Common Functions

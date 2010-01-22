@@ -29,7 +29,7 @@ INCLUDES=$(wildcard ../$(INCLUDE_DIR)/*.hrl)
 DEPS_DIR=../deps
 COMMON_PACKAGE=rabbit_common-$(VERSION)
 
-ERLC_OPTS=-I ../include -o ./ -Wall -v +debug_info
+ERLC_OPTS=-I ../include -o ./ -Wall -v +debug_info $(DEFINE_DEBUG_OUTPUT)
 LIBS_PATH=ERL_LIBS=$(DEPS_DIR)
 
 all: compile
@@ -41,3 +41,4 @@ compile: $(TEST_TARGETS)
 
 clean:
 	rm -f *.beam
+

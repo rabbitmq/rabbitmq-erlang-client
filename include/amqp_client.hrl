@@ -31,6 +31,8 @@
 -define(PROTOCOL_HEADER,
         <<"AMQP", 1, 1, ?PROTOCOL_VERSION_MAJOR, ?PROTOCOL_VERSION_MINOR>>).
 
+-define(MAX_CHANNEL_NUMBER, 65535).
+
 -record(amqp_msg, {props = #'P_basic'{}, payload = <<>>}).
 
 -record(amqp_params, {username     = <<"guest">>,
@@ -38,50 +40,19 @@
                       virtual_host = <<"/">>,
                       host         = "localhost",
                       port         = ?PROTOCOL_PORT,
-                      ssl_options  = undefined}).
+                      channel_max  = 0,
+                      frame_max    = 0,
+                      heartbeat    = 0,
+                      ssl_options  = none}).
 
--record(connection_state, {username,
-                           password,
-                           serverhost,
-                           sock,
-                           vhostpath,
-                           main_reader_pid,
-                           channel0_writer_pid,
-                           channel0_reader_pid,
-                           channel_max,
-                           heartbeat,
-                           driver,
-                           port,
-                           closing = false,
-                           close_reason,
-                           channels = dict:new(),
-                           ssl_options}).
-
--record(channel_state, {number,
-                        parent_connection,
-                        reader_pid,
-                        writer_pid,
-                        driver,
-                        rpc_requests = queue:new(),
-                        anon_sub_requests = queue:new(),
-                        tagged_sub_requests = dict:new(),
-                        closing = false,
-                        return_handler_pid,
-                        flow_control = false,
-                        flow_handler_pid,
-                        consumers = dict:new()}).
-
--record(rpc_client_state, {channel,
-                           reply_queue,
-                           exchange,
-                           routing_key,
-                           continuations = dict:new(),
-                           correlation_id = 0}).
-
--record(rpc_server_state, {channel,
-                           handler}).
-
--define(LOG_DEBUG(Format), error_logger:info_msg(Format)).
 -define(LOG_INFO(Format, Args), error_logger:info_msg(Format, Args)).
 -define(LOG_WARN(Format, Args), error_logger:warning_msg(Format, Args)).
 
+%% Enable debug output by setting env var DEBUG_OUTPUT="true" when running make
+%% targets
+-ifdef(enable_debug_output).
+-define(LOG_DEBUG(Format, Args), error_logger:info_msg(Format, Args)).
+-else.
+%% Avoid a warning (this does nothing)
+-define(LOG_DEBUG(Format, Args), fun() -> {Format, Args} end()).
+-endif.

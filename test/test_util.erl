@@ -456,7 +456,7 @@ channel_flow_test(Connection) ->
     receive
         ok -> ok
     after 10000 ->
-        ?LOG_DEBUG("Are you sure that you have waited 1 minute?~n"),
+        ?LOG_INFO("Are you sure that you have waited 1 minute?~n", []),
         exit(did_not_receive_channel_flow)
     end.
 
@@ -537,7 +537,7 @@ cf_producer_loop(Channel, X, Key, PublishFun, Payload, N) ->
 cf_handler_loop(Producer) ->
     receive
         #'channel.flow'{active = false} ->
-            ?LOG_DEBUG("Producer throttling ON~n"),
+            ?LOG_INFO("Producer throttling ON~n", []),
             cf_handler_loop(Producer);
         #'channel.flow'{active = true} ->
             ?LOG_INFO("Producer throttling OFF, waking up producer (~p)~n",
