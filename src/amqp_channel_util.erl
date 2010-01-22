@@ -224,23 +224,20 @@ broadcast_to_channels(Message, _Channels = {_, DictPN}) ->
 handle_exit(Pid, Reason, Channels, Closing) ->
     case is_channel_pid_registered(Pid, Channels) of
         true ->
-            case handle_channel_exit(Pid, Reason, Closing) of
-                #amqp_error{} = AmqpError ->
-                    handle_channel_amqp_error(Pid, AmqpError, Channels);
-                Other ->
-                    Other
-            end;
+            Number = resolve_channel_pid(Pid, Channels),
+            handle_channel_exit(Pid, Number, Reason, Closing);
         false ->
             ?LOG_WARN("Connection (~p) closing: received unexpected "
                       "exit signal from (~p). Reason: ~p~n",
                       [self(), Pid, Reason]),
-            #amqp_error{name = internal_error}
+            amqp_error(0, #amqp_error{name = internal_error})
     end.
 
-handle_channel_exit(_Pid, normal, _Closing) ->
+handle_channel_exit(_Pid, _Number, normal, _Closing) ->
     %% Normal amqp_channel shutdown
     normal;
-handle_channel_exit(Pid, {server_initiated_close, Code, _Text}, false) ->
+handle_channel_exit(Pid, _Number,
+                    {server_initiated_close, Code, _Text}, false) ->
     %% Channel terminating (server sent 'channel.close')
     {IsHardError, _, _} = rabbit_framing:lookup_amqp_exception(
                             rabbit_framing:amqp_exception(Code)),
@@ -250,23 +247,26 @@ handle_channel_exit(Pid, {server_initiated_close, Code, _Text}, false) ->
                  stop;
         false -> normal
     end;
-handle_channel_exit(_Pid, #amqp_error{} = AmqpError, _Closing) ->
-    %% Channel terminating with amqp error (usually due to server misbehavior)
-    AmqpError;
-handle_channel_exit(_Pid, {_CloseReason, _Code, _Text}, Closing)
+handle_channel_exit(Pid, _Number, {hard_error, Close}, _Closing) ->
+    %% Channel terminating with hard error - takes the entire connection down
+    ?LOG_WARN("Connection (~p) closing due to hard error in channel (~p)~n",
+              [self(), Pid]),
+    {error, Close};
+handle_channel_exit(_Pid, _Number, {_CloseReason, _Code, _Text}, Closing)
   when Closing =/= false ->
     %% Channel terminating due to connection closing
     normal;
-handle_channel_exit(_Pid, _Reason, _Closing) ->
+handle_channel_exit(Pid, Number, _Reason, _Closing) ->
     %% amqp_channel died with internal reason
-    #amqp_error{name = internal_error}.
+    ?LOG_WARN("Connection (~p): channel (~p) died with internal reason~n",
+              [self(), Pid]),
+    amqp_error(Number, #amqp_error{name = internal_error}).
 
-handle_channel_amqp_error(Pid, #amqp_error{} = AmqpError, Channels) ->
+%% TODO remove duplication with amqp_network_connection:amqp_error/2
+%% (bug22069)
+amqp_error( Number, #amqp_error{} = AmqpError) ->
     {ShouldClose, _, Close} =
-        rabbit_binary_generator:map_exception(resolve_channel_pid(Pid, Channels),
-                                              AmqpError),
-    ?LOG_WARN("Connection (~p): channel (~p) died with ~s ~p~n", [self(), Pid,
-              if ShouldClose -> "hard"; true -> "soft" end, AmqpError]),
+        rabbit_binary_generator:map_exception(Number, AmqpError),
     if ShouldClose -> {error, Close};
        true        -> normal
     end.

@@ -278,6 +278,20 @@ is_connection_method(Method) ->
     {ClassId, _} = rabbit_framing:method_id(element(1, Method)),
     rabbit_framing:lookup_class_name(ClassId) == connection.
 
+handle_amqp_error(#amqp_error{} = AmqpError,
+                  #c_state{number = ChannelNumber} = State) ->
+    {ShouldClose, _, Close} =
+        rabbit_binary_generator:map_exception(ChannelNumber, AmqpError),
+    if ShouldClose ->
+           {stop, {hard_error, Close}, State};
+       true ->
+           ?LOG_WARN("Channel (~p) flushing and closing due to soft error ~p~n",
+                     [self(), AmqpError]),
+           ChannelPid = self(),
+           spawn(fun() -> call(ChannelPid, Close) end),
+           {noreply, State}
+    end.
+
 %%---------------------------------------------------------------------------
 %% Handling of methods from the server
 %%---------------------------------------------------------------------------
@@ -286,9 +300,8 @@ handle_method(Method, Content, #c_state{closing = Closing} = State) ->
     case is_connection_method(Method) of
         true ->
             %% Die if it's a 'connection.' method
-            {stop, #amqp_error{name   = command_invalid,
-                               method = element(1, Method)},
-             State};
+            handle_amqp_error(#amqp_error{name   = command_invalid,
+                                          method = element(1, Method)}, State);
         false ->
             case {Method, Content} of
                 %% Handle 'channel.close': send 'channel.close_ok' and stop
@@ -300,6 +313,7 @@ handle_method(Method, Content, #c_state{closing = Closing} = State) ->
                      State};
                 %% Handle 'channel.close_ok': stop channel
                 {CloseOk = #'channel.close_ok'{}, none} ->
+                    true = (Closing =/= false), %% assertion
                     {stop, normal, rpc_bottom_half(CloseOk, State)};
                 _ ->
                     case Closing of
@@ -603,8 +617,14 @@ handle_info({'EXIT', Pid, Reason}, State = #c_state{number = ChannelNumber}) ->
 
 %% @private
 terminate(_Reason, #c_state{driver = Driver,
-                           reader_pid = ReaderPid,
-                           writer_pid = WriterPid}) ->
+                            reader_pid = ReaderPid,
+                            writer_pid = WriterPid,
+                            rpc_requests = RpcQueue}) ->
+    case queue:is_empty(RpcQueue) of
+        false -> ?LOG_WARN("Channel (~p): RPC queue was not empty on "
+                           "terminate", [self()]);
+        true  -> ok
+    end,
     amqp_channel_util:terminate_channel_infrastructure(
         Driver, {ReaderPid, WriterPid}).
 
