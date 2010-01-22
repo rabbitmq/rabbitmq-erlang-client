@@ -624,7 +624,7 @@ terminate(_Reason, #c_state{driver = Driver,
                             rpc_requests = RpcQueue}) ->
     case queue:is_empty(RpcQueue) of
         false -> ?LOG_WARN("Channel (~p): RPC queue was not empty on "
-                           "terminate", [self()]);
+                           "terminate~n", [self()]);
         true  -> ok
     end,
     amqp_channel_util:terminate_channel_infrastructure(

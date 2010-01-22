@@ -84,7 +84,7 @@ handle_info(timeout_waiting_for_close_ok = Msg,
 %% This can be sent by any of auxiliary process of the connection to
 %% trigger closing with error
 handle_info(#amqp_error{} = AmqpError, State) ->
-    ?LOG_WARN("Connection (~p) closing: received ~p", [self(), AmqpError]),
+    ?LOG_WARN("Connection (~p) closing: received ~p~n", [self(), AmqpError]),
     {noreply, amqp_error(AmqpError, State)};
 
 %% Standard handling of exit signals
@@ -259,6 +259,9 @@ amqp_error(#amqp_error{} = AmqpError, State) ->
     set_closing_state(abrupt, #nc_closing{reason = error,
                                           close = Close}, State).
 
+internal_error(State) ->
+    amqp_error(#amqp_error{name = internal_error}, State).
+
 %%---------------------------------------------------------------------------
 %% Channel utilities
 %%---------------------------------------------------------------------------
@@ -334,7 +337,11 @@ handle_exit(Pid, Reason,
             {noreply,
              set_closing_state(abrupt, #nc_closing{reason = error,
                                                    close  = Close},
-                               unregister_channel(Pid, State))}
+                               unregister_channel(Pid, State))};
+        internal_error ->
+            {noreply, internal_error(unregister_channel(Pid, State))};
+        other ->
+            {noreply, internal_error(State)}
     end.
 
 %%---------------------------------------------------------------------------

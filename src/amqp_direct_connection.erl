@@ -217,5 +217,9 @@ handle_exit(Pid, Reason,
             {noreply,
              set_closing_state(abrupt, #dc_closing{reason = error,
                                                    close  = Close},
-                               unregister_channel(Pid, State))}
+                               unregister_channel(Pid, State))};
+        internal_error ->
+            {noreply, internal_error(unregister_channel(Pid, State))};
+        other ->
+            {noreply, internal_error(State)}
     end.
