@@ -99,9 +99,13 @@ handle_inet_async({inet_async, Sock, _, Msg},
 handle_frame(Type, Channel, Payload, State) ->
     case rabbit_reader:analyze_frame(Type, Payload) of
         heartbeat when Channel /= 0 ->
-            State#mr_state.connection_pid ! #amqp_error{name = command_invalid};
+            Expl = "heartbeat frame over non-zero channel",
+            State#mr_state.connection_pid ! #amqp_error{name = command_invalid,
+                                                        explanation = Expl};
         trace when Channel /= 0 ->
-            State#mr_state.connection_pid ! #amqp_error{name = command_invalid};
+            Expl = "trace frame over non-zero channel",
+            State#mr_state.connection_pid ! #amqp_error{name = command_invalid,
+                                                        explanation = Expl};
         %% Match heartbeats and trace frames, but don't do anything with them
         heartbeat ->
             heartbeat;

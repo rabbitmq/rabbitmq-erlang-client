@@ -152,8 +152,10 @@ handle_method(#'connection.close_ok'{}, none,
     end;
 
 handle_method(OtherMethod, _, State) ->
-    {noreply, amqp_error(#amqp_error{name   = command_invalid,
-                                     method = element(1, OtherMethod)}, State)}.
+    {noreply,
+     amqp_error(#amqp_error{name        = command_invalid,
+                            explanation = "unexpected method on channel 0",
+                            method      = element(1, OtherMethod)}, State)}.
 
 %%---------------------------------------------------------------------------
 %% Closing

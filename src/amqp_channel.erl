@@ -299,9 +299,11 @@ handle_amqp_error(#amqp_error{} = AmqpError,
 handle_method(Method, Content, #c_state{closing = Closing} = State) ->
     case is_connection_method(Method) of
         true ->
-            %% Die if it's a 'connection.' method
-            handle_amqp_error(#amqp_error{name   = command_invalid,
-                                          method = element(1, Method)}, State);
+            handle_amqp_error(#amqp_error{
+                    name        = command_invalid,
+                    explanation = "connection method on non-zero channel",
+                    method      = element(1, Method)},
+                State);
         false ->
             case {Method, Content} of
                 %% Handle 'channel.close': send 'channel.close_ok' and stop
