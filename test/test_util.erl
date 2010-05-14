@@ -556,8 +556,7 @@ setup_publish(Channel) ->
                        q = <<"a.b.c">>,
                        x = <<"x">>,
                        bind_key = <<"a.b.c.*">>,
-                       payload = <<"foobar">>
-                       },
+                       payload = <<"foobar">>},
     setup_publish(Channel, Publish).
 
 setup_publish(Channel, #publish{routing_key = RoutingKey,
