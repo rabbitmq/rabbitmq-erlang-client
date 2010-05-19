@@ -380,6 +380,15 @@ handle_regular_method(
     end,
     {noreply, State};
 
+handle_regular_method(
+        #'basic.recover_ok'{} = BasicRecoverOk,
+        None, State = #c_state{consumers = Consumers}) ->
+    none = None,
+    [Consumer ! BasicRecoverOk || {_, Consumer} <- dict:to_list(Consumers)],
+    %% Still pass it back to the RPC mechanism, we want the original invoker to
+    %% unblock.
+    {noreply, rpc_bottom_half(BasicRecoverOk, State)};
+
 handle_regular_method(Method, none, State) ->
     {noreply, rpc_bottom_half(Method, State)};
 

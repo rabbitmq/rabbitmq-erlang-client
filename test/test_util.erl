@@ -264,6 +264,11 @@ basic_recover_test(Connection) ->
     BasicRecover = #'basic.recover'{requeue = true},
     amqp_channel:cast(Channel, BasicRecover),
     receive
+        #'basic.recover_ok'{} -> ok
+    after 2000 ->
+        exit(did_not_receive_basic_recover_ok)
+    end,
+    receive
         {#'basic.deliver'{delivery_tag = DeliveryTag2}, _} ->
             amqp_channel:cast(Channel,
                               #'basic.ack'{delivery_tag = DeliveryTag2})
