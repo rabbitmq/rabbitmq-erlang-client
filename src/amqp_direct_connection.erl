@@ -34,12 +34,17 @@
 
 -record(dc_state, {params = #amqp_params{},
                    closing = false,
-                   channels = amqp_channel_util:new_channel_dict()}).
+                   server_properties,
+                   channels = amqp_channel_util:new_channel_dict(),
+                   queue_collector = none}).
 
 -record(dc_closing, {reason,
                      close = none, %% At least one of close and reply has to be
                      reply = none, %%     none at any given moment
                      from = none}).
+
+-define(INFO_KEYS,
+        (amqp_connection:info_keys() ++ [])).
 
 %%---------------------------------------------------------------------------
 %% gen_server callbacks
@@ -57,19 +62,24 @@ init(AmqpParams = #amqp_params{username = User,
     rabbit_access_control:check_vhost_access(#user{username = User,
                                                    password = Pass},
                                              VHost),
-    State0 = #dc_state{params = AmqpParams},
-    ?LOG_DEBUG("Spawned direct connection process (~p).~n"
-               "    AmqpParams= ~p~n"
-               "    InitialState= ~p~n",
-               [self(), AmqpParams, State0]),
-    {ok, State0}.
+    {ok, Collector} = rabbit_reader_queue_collector:start_link(),
+    ServerProperties = rabbit_reader:server_properties(),
+    {ok, #dc_state{params = AmqpParams,
+                   queue_collector = Collector,
+                   server_properties = ServerProperties}}.
 
 %% Standard handling of an app initiated command
 handle_call({command, Command}, From, #dc_state{closing = Closing} = State) ->
     case Closing of
         false -> handle_command(Command, From, State);
         _     -> {reply, closing, State}
-    end.
+    end;
+
+handle_call({info, Items}, _From, State) ->
+    {reply, [{Item, i(Item, State)} || Item <- Items], State};
+
+handle_call(info_keys, _From, State) ->
+    {reply, ?INFO_KEYS, State}.
 
 %% No cast implemented
 handle_cast(Message, State) ->
@@ -88,10 +98,7 @@ handle_info({shutdown, Reason}, State) ->
 handle_info({'EXIT', Pid, Reason}, State) ->
     handle_exit(Pid, Reason, State).
 
-terminate(Reason, _State) ->
-    ?LOG_DEBUG("Direct connection process (~p): terminating~n"
-               "    Reason=~p~n",
-               [self(), Reason]),
+terminate(_Reason, _State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -102,10 +109,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%---------------------------------------------------------------------------
 
 handle_command({open_channel, ProposedNumber}, _From,
-               State = #dc_state{params = Params,
-                                 channels = Channels}) ->
+               State = #dc_state{params = #amqp_params{username = User,
+                                                       virtual_host=VHost},
+                                 channels = Channels,
+                                 queue_collector = Collector}) ->
+
     try amqp_channel_util:open_channel(ProposedNumber, ?MAX_CHANNEL_NUMBER,
-                                       direct, Params, Channels) of
+                                       direct, {User, VHost, Collector},
+                                       Channels) of
         {ChannelPid, NewChannels} ->
             {reply, ChannelPid, State#dc_state{channels = NewChannels}}
     catch
@@ -118,6 +129,17 @@ handle_command({close, Close}, From, State) ->
                                                    close = Close,
                                                    from = From},
                                 State)}.
+
+%%---------------------------------------------------------------------------
+%% Infos
+%%---------------------------------------------------------------------------
+
+i(server_properties, State) -> State#dc_state.server_properties;
+i(is_closing,        State) -> State#dc_state.closing =/= false;
+i(amqp_params,       State) -> State#dc_state.params;
+i(num_channels,      State) -> amqp_channel_util:num_channels(
+                                   State#dc_state.channels);
+i(Item,             _State) -> throw({bad_argument, Item}).
 
 %%---------------------------------------------------------------------------
 %% Closing
@@ -135,7 +157,6 @@ handle_command({close, Close}, From, State) ->
 set_closing_state(ChannelCloseType, Closing,
                   #dc_state{closing = false,
                             channels = Channels} = State) ->
-    log_set_closing_state(ChannelCloseType, Closing, State),
     amqp_channel_util:broadcast_to_channels(
         {connection_closing, ChannelCloseType, closing_to_reason(Closing)},
         Channels),
@@ -144,7 +165,6 @@ set_closing_state(ChannelCloseType, Closing,
 set_closing_state(ChannelCloseType, NewClosing,
                   #dc_state{closing = CurClosing,
                             channels = Channels} = State) ->
-    log_set_closing_state(ChannelCloseType, NewClosing, State),
     %% Do not override reason in channels (because it might cause channels to
     %% to exit with different reasons) but do cause them to close abruptly
     %% if the new closing type requires it
@@ -167,20 +187,17 @@ set_closing_state(ChannelCloseType, NewClosing,
        end,
    State#dc_state{closing = ResClosing}.
 
-log_set_closing_state(ChannelCloseType, Closing, State) ->
-    ?LOG_DEBUG("Direct connection process (~p): setting closing state~n"
-               "    ChannelCloseType= ~p~n"
-               "    Closing= ~p~n"
-               "    CurrentState= ~p~n",
-               [self(), ChannelCloseType, Closing, State]).
-
 %% The all_channels_closed_event is called when all channels have been closed
 %% after the connection broadcasts a connection_closing message to all channels
-all_channels_closed_event(#dc_state{closing = Closing} = State) ->
+all_channels_closed_event(#dc_state{closing = Closing,
+                                    queue_collector = Collector} = State) ->
     case Closing#dc_closing.from of
         none -> ok;
         From -> gen_server:reply(From, ok)
     end,
+    rabbit_reader_queue_collector:delete_all(Collector),
+    rabbit_reader_queue_collector:shutdown(Collector),
+    rabbit_misc:unlink_and_capture_exit(Collector),
     self() ! {shutdown, closing_to_reason(Closing)},
     State.
 
