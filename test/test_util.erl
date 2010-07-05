@@ -225,9 +225,12 @@ consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
                           exchange = X,
                           routing_key = RoutingKey},
     amqp_channel:call(Channel, Route),
-    #'basic.consume_ok'{consumer_tag = Tag} =
-        amqp_channel:call(Channel, #'basic.consume'{queue = Q,
-                                                    consumer_tag = Tag}),
+    amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q,
+                                                     consumer_tag = Tag},
+                           self()),
+    receive
+        #'basic.consume_ok'{consumer_tag = Tag} -> ok
+    end,
     receive
         {#'basic.deliver'{}, _} -> ok
     end,
@@ -239,10 +242,16 @@ consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
 
 basic_recover_test(Connection) ->
     Channel = amqp_connection:open_channel(Connection),
-    #'queue.declare_ok'{queue = Q}
-        = amqp_channel:call(Channel, #'queue.declare'{}),
-    #'basic.consume_ok'{}
-        = amqp_channel:call(Channel, #'basic.consume'{queue = Q}),
+    #'queue.declare_ok'{queue = Q} =
+        amqp_channel:call(Channel, #'queue.declare'{}),
+    #'basic.consume_ok'{consumer_tag = Tag} =
+        amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q},
+                                 self()),
+    receive
+        #'basic.consume_ok'{consumer_tag = Tag} -> ok
+    after 2000 ->
+        exit(did_not_receive_subscription_message)
+    end,
     Publish = #'basic.publish'{exchange = <<>>, routing_key = Q},
     amqp_channel:call(Channel, Publish, #amqp_msg{payload = <<"foobar">>}),
     receive
@@ -283,8 +292,9 @@ basic_qos_test(Connection, Prefetch) ->
                 Channel = amqp_connection:open_channel(Connection),
                 amqp_channel:call(Channel,
                                  #'basic.qos'{prefetch_count = Prefetch}),
-                #'basic.consume_ok'{} =
-                        amqp_channel:call(Channel, #'basic.consume'{queue = Q}),
+                amqp_channel:subscribe(Channel,
+                                       #'basic.consume'{queue = Q},
+                                       self()),
                 Parent ! finished,
                 sleeping_consumer(Channel, Sleep, Parent)
             end) || Sleep <- Workers],
@@ -302,6 +312,8 @@ sleeping_consumer(Channel, Sleep, Parent) ->
     receive
         stop ->
             do_stop(Channel, Parent);
+        #'basic.consume_ok'{} ->
+            sleeping_consumer(Channel, Sleep, Parent);
         #'basic.cancel_ok'{}  ->
             ok;
         {#'basic.deliver'{delivery_tag = DeliveryTag}, _Content} ->
@@ -367,8 +379,9 @@ pub_and_close_test(Connection1, Connection2) ->
     amqp_connection:close(Connection1),
     %% Get sent messages back and count them
     Channel2 = amqp_connection:open_channel(Connection2),
-    #'basic.consume_ok'{} =
-        amqp_channel:call(Channel2, #'basic.consume'{queue = Q, no_ack = true}),
+    amqp_channel:subscribe(Channel2, 
+                           #'basic.consume'{queue = Q, no_ack = true}, 
+                           self()),
     ?assert(pc_consumer_loop(Channel2, Payload, 0) == NMessages),
     %% Make sure queue is empty
     #'queue.declare_ok'{queue = Q, message_count = NRemaining} =
@@ -441,7 +454,7 @@ channel_flow_test(Connection) ->
     receive
         ok -> ok
     after 10000 ->
-        ?LOG_INFO("Are you sure that you have waited 1 minute?~n", []),
+        ?LOG_DEBUG("Are you sure that you have waited 1 minute?~n"),
         exit(did_not_receive_channel_flow)
     end.
 
@@ -476,14 +489,17 @@ start_channel_flow(Connection, PublishFun) ->
                                  exchange = X,
                                  routing_key = Key},
             amqp_channel:call(Channel, Bind),
-            #'basic.consume_ok'{consumer_tag = Tag}
-                = amqp_channel:call(Channel, #'basic.consume'{queue = Q}),
+            #'basic.consume_ok'{consumer_tag = Tag} 
+                = amqp_channel:subscribe(Channel, #'basic.consume'{queue = Q},
+                                         self()),
+            
             cf_consumer_loop(Channel, Tag)
         end),
     {Producer, Consumer}.
 
 cf_consumer_loop(Channel, Tag) ->
     receive
+        #'basic.consume_ok'{} -> cf_consumer_loop(Channel, Tag);
         #'basic.cancel_ok'{} -> ok;
         {#'basic.deliver'{delivery_tag = DeliveryTag}, _Content} ->
             amqp_channel:call(Channel,
@@ -519,7 +535,7 @@ cf_producer_loop(Channel, X, Key, PublishFun, Payload, N) ->
 cf_handler_loop(Producer) ->
     receive
         #'channel.flow'{active = false} ->
-            ?LOG_INFO("Producer throttling ON~n", []),
+            ?LOG_DEBUG("Producer throttling ON~n"),
             cf_handler_loop(Producer);
         #'channel.flow'{active = true} ->
             ?LOG_INFO("Producer throttling OFF, waking up producer (~p)~n",
