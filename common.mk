@@ -67,7 +67,7 @@ PACKAGE=amqp_client
 PACKAGE_DIR=$(PACKAGE)-$(VERSION)
 PACKAGE_NAME_EZ=$(PACKAGE_DIR).ez
 COMMON_PACKAGE=rabbit_common
-export COMMON_PACKAGE_DIR=$(COMMON_PACKAGE)$(if $(APPEND_VERSION),-$(VERSION),)
+export COMMON_PACKAGE_DIR=$(COMMON_PACKAGE)-$(VERSION)
 COMMON_PACKAGE_EZ=$(COMMON_PACKAGE_DIR).ez
 
 DEPS=$(shell erl -noshell -eval '{ok,[{_,_,[_,_,{modules, Mods},_,_,_]}]} = \
