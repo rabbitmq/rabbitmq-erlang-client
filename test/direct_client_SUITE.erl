@@ -98,6 +98,10 @@ bogus_rpc_test() ->
 channel_death_test() ->
     negative_test_util:channel_death_test(new_connection()).
 
+command_invalid_over_channel_test() ->
+    negative_test_util:command_invalid_over_channel_test(new_connection(),
+                                                         direct).
+
 %%---------------------------------------------------------------------------
 %% Common Functions
 %%---------------------------------------------------------------------------
@@ -109,4 +113,3 @@ test_coverage() ->
     rabbit_misc:enable_cover(),
     test(),
     rabbit_misc:report_cover().
-

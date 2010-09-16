@@ -120,6 +120,13 @@ channel_writer_death_test() ->
 channel_death_test() ->
     negative_test_util:channel_death_test(new_connection()).
 
+command_invalid_over_channel_test() ->
+    negative_test_util:command_invalid_over_channel_test(new_connection(),
+                                                         network).
+
+command_invalid_over_channel0_test() ->
+    negative_test_util:command_invalid_over_channel0_test(new_connection()).
+
 shortstr_overflow_property_test() ->
     negative_test_util:shortstr_overflow_property_test(new_connection()).
 

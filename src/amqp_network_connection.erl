@@ -87,9 +87,15 @@ handle_cast({method, Method, Content}, State) ->
 %% but timed out waiting for 'connection.close_ok' back
 handle_info(timeout_waiting_for_close_ok = Msg,
             State = #nc_state{closing = Closing}) ->
-    ?LOG_WARN("Connection ~p closing: timed out waiting for"
+    ?LOG_WARN("Connection (~p) closing: timed out waiting for"
               "'connection.close_ok'.", [self()]),
     {stop, {Msg, closing_to_reason(Closing)}, State};
+
+%% This can be sent by any of auxiliary process of the connection to
+%% trigger closing with error
+handle_info(#amqp_error{} = AmqpError, State) ->
+    ?LOG_WARN("Connection (~p) closing: received ~p~n", [self(), AmqpError]),
+    {noreply, amqp_error(AmqpError, State)};
 
 %% Standard handling of exit signals
 handle_info({'EXIT', Pid, Reason}, State) ->
@@ -151,7 +157,13 @@ handle_method(#'connection.close_ok'{}, none,
     end,
     if ReplyCode =:= 200 -> {stop, normal, State};
        true              -> {stop, closing_to_reason(Closing), State}
-    end.
+    end;
+
+handle_method(OtherMethod, _, State) ->
+    {noreply,
+     amqp_error(#amqp_error{name        = command_invalid,
+                            explanation = "unexpected method on channel 0",
+                            method      = element(1, OtherMethod)}, State)}.
 
 %%---------------------------------------------------------------------------
 %% Infos
@@ -180,17 +192,16 @@ i(Item,             _State) -> throw({bad_argument, Item}).
 %%         the channels have terminated (and flushed); the from field is the
 %%         process that initiated the call and to whom the server must reply.
 %%         phase = terminate_channels | wait_close_ok
-%%     internal_error - there was an internal error either in a channel or in
-%%         the connection process. close field is the method to be sent to the
-%%         server after all channels have been abruptly terminated (do not flush
-%%         in this case).
+%%     error - there was either an internal error or the server misbehaved.
+%%         close field is the method to be sent to the server after all channels
+%%         have been abruptly terminated (do not flush in this case).
 %%         phase = terminate_channels | wait_close_ok
 %%     server_initiated_close - server has sent 'connection.close'. close field
 %%         is the method sent by the server.
 %%         phase = terminate_channels | wait_socket_close
 %%
 %% The precedence of the closing MainReason's is as follows:
-%%     app_initiated_close, internal_error, server_initiated_close
+%%     app_initiated_close, error, server_initiated_close
 %% (i.e.: a given reason can override the currently set one if it is later
 %% mentioned in the above list). We can rely on erlang's comparison of atoms
 %% for this.
@@ -264,12 +275,13 @@ closing_to_reason(#nc_closing{reason = Reason,
                                                           reply_text = Text}}) ->
     {Reason, Code, Text}.
 
-internal_error_closing() ->
-    #nc_closing{reason = internal_error,
-                close = #'connection.close'{reply_text = <<>>,
-                                            reply_code = ?INTERNAL_ERROR,
-                                            class_id = 0,
-                                            method_id = 0}}.
+amqp_error(#amqp_error{} = AmqpError, State) ->
+    {true, 0, Close} = rabbit_binary_generator:map_exception(0, AmqpError),
+    set_closing_state(abrupt, #nc_closing{reason = error,
+                                          close = Close}, State).
+
+internal_error(State) ->
+    amqp_error(#amqp_error{name = internal_error}, State).
 
 %%---------------------------------------------------------------------------
 %% Channel utilities
@@ -338,12 +350,19 @@ handle_exit(MainReaderPid, Reason,
 handle_exit(Pid, Reason,
             #nc_state{channels = Channels, closing = Closing} = State) ->
     case amqp_channel_util:handle_exit(Pid, Reason, Channels, Closing) of
-        stop   -> {stop, Reason, State};
-        normal -> {noreply, unregister_channel(Pid, State)};
-        close  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              unregister_channel(Pid, State))};
-        other  -> {noreply, set_closing_state(abrupt, internal_error_closing(),
-                                              State)}
+        stop ->
+            {stop, Reason, State};
+        normal ->
+            {noreply, unregister_channel(Pid, State)};
+        {error, Close} ->
+            {noreply,
+             set_closing_state(abrupt, #nc_closing{reason = error,
+                                                   close  = Close},
+                               unregister_channel(Pid, State))};
+        internal_error ->
+            {noreply, internal_error(unregister_channel(Pid, State))};
+        other ->
+            {noreply, internal_error(State)}
     end.
 
 %%---------------------------------------------------------------------------
