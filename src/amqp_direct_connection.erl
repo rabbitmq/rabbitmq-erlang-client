@@ -216,6 +216,7 @@ handle_all_channels_terminated(State = #state{closing = Closing,
     case Closing#closing.from of none -> ok;
                                  From -> gen_server:reply(From, ok)
     end,
+    rabbit_event:notify(connection_closed, [{pid, self()}]),
     {stop, closing_to_reason(Closing), State}.
 
 closing_to_reason(#closing{close = #'connection.close'{reply_code = 200}}) ->
