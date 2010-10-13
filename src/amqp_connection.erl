@@ -41,7 +41,7 @@
 -export([info/2, info_keys/1, info_keys/0]).
 
 -define(COMMON_INFO_KEYS,
-        [type, server_properties, is_closing, amqp_params, num_channels]).
+        [type, server_properties, is_closing, amqp_params, channels]).
 
 %%---------------------------------------------------------------------------
 %% Type Definitions
@@ -78,7 +78,7 @@
 
 %% @spec (Type) -> {ok, Connection} | {error, Error}
 %% where
-%%     Type = network | direct
+%%     Type = network | direct | {direct, adapter_info()}
 %%     Connection = pid()
 %% @doc Starts a connection to an AMQP server. Use network type to connect
 %% to a remote AMQP server - default connection settings are used, meaning that
@@ -92,18 +92,20 @@ start(Type) ->
 
 %% @spec (Type, amqp_params()) -> {ok, Connection} | {error, Error}
 %% where
-%%      Type = network | direct
+%%      Type = network | direct | {direct, adapter_info()}
 %%      Connection = pid()
 %% @doc Starts a connection to an AMQP server. Use network type to connect
 %% to a remote AMQP server or direct type for a direct connection to
 %% a RabbitMQ server, assuming that the server is running in the same process
 %% space.
+start(direct, AmqpParams) ->
+    start({direct, #adapter_info{protocol={'AMQP (direct)', ?PROTOCOL:version()}}}, AmqpParams);
 start(Type, AmqpParams) ->
     amqp_client:start(),
     {ok, _Sup, Connection} =
         amqp_sup:start_connection_sup(Type, AmqpParams),
-    Module = case Type of direct  -> amqp_direct_connection;
-                          network -> amqp_network_connection
+    Module = case Type of {direct, _} -> amqp_direct_connection;
+                          network     -> amqp_network_connection
              end,
     try Module:connect(Connection) of
         ok -> {ok, Connection}
@@ -118,7 +120,7 @@ start(Type, AmqpParams) ->
 %% Commands
 %%---------------------------------------------------------------------------
 
-%% @doc Invokes open_channel(ConnectionPid, none). 
+%% @doc Invokes open_channel(ConnectionPid, none).
 %% Opens a channel without having to specify a channel number.
 open_channel(ConnectionPid) ->
     open_channel(ConnectionPid, none).
@@ -189,7 +191,7 @@ close(ConnectionPid, Code, Text) ->
 %%    and false otherwise</li>
 %%<li>amqp_params - returns the #amqp_params{} structure used to start the
 %%    connection</li>
-%%<li>num_channels - returns the number of channels currently open under the
+%%<li>channels - returns the number of channels currently open under the
 %%    connection (excluding channel 0)</li>
 %%<li>channel_max - returns the channel_max value negotiated with the server
 %%    (only for the network connection)</li>

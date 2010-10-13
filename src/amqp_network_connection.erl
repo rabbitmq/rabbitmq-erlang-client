@@ -180,7 +180,7 @@ i(amqp_params,       State) -> State#state.params;
 i(channel_max,       State) -> State#state.channel_max;
 i(heartbeat,         State) -> State#state.heartbeat;
 i(sock,              State) -> State#state.sock;
-i(num_channels,      State) -> amqp_channels_manager:num_channels(
+i(channels,          State) -> amqp_channels_manager:num_channels(
                                  State#state.channels_manager);
 i(Item,             _State) -> throw({bad_argument, Item}).
 

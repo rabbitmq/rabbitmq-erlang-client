@@ -38,15 +38,19 @@
 
 start_link(Type, AmqpParams) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
+    Driver = case Type of
+                 {direct, _} -> direct;
+                 network     -> network
+             end,
     {ok, ChSupSup} = supervisor2:start_child(
                        Sup,
                        {channel_sup_sup, {amqp_channel_sup_sup, start_link,
-                                          [Type]},
+                                          [Driver]},
                         intrinsic, infinity, supervisor,
                         [amqp_channel_sup_sup]}),
     {ok, Connection} =
         start_connection(Sup, Type, AmqpParams,
-                         start_infrastructure_fun(Sup, Type, ChSupSup)),
+                         start_infrastructure_fun(Sup, Driver, ChSupSup)),
     {ok, Sup, Connection}.
 
 %%---------------------------------------------------------------------------
@@ -59,11 +63,11 @@ start_connection(Sup, network, AmqpParams, SIF) ->
                 {connection, {amqp_network_connection, start_link,
                               [AmqpParams, SIF]},
                  intrinsic, brutal_kill, worker, [amqp_network_connection]});
-start_connection(Sup, direct, AmqpParams, SIF) ->
+start_connection(Sup, {direct, AdapterInfo}, AmqpParams, SIF) ->
     {ok, _} = supervisor2:start_child(
                 Sup,
                 {connection, {amqp_direct_connection, start_link,
-                              [AmqpParams, SIF]},
+                              [AmqpParams, SIF, AdapterInfo]},
                  intrinsic, brutal_kill, worker, [amqp_direct_connection]}).
 
 start_infrastructure_fun(Sup, network, ChSupSup) ->

@@ -29,12 +29,14 @@
 
 -behaviour(gen_server).
 
--export([start_link/2, connect/1]).
+-export([start_link/3, connect/1]).
 -export([init/1, terminate/2, code_change/3, handle_call/3, handle_cast/2,
          handle_info/2]).
+%%-export([emit_stats/1]).
 
 -record(state, {sup,
                 params = #amqp_params{},
+                adapter_info = none,
                 collector,
                 channels_manager,
                 closing = false,
@@ -43,17 +45,20 @@
 
 -record(closing, {reason,
                   close,
-                  from = none}).
+                  from  = none}).
 
+-define(CREATION_EVENT_KEYS, [pid, protocol, address, port, peer_address, peer_port,
+                              user, vhost, client_properties]).
 -define(INFO_KEYS,
-        (amqp_connection:info_keys() ++ [])).
+        (amqp_connection:info_keys() ++ ?CREATION_EVENT_KEYS)).
 
 %%---------------------------------------------------------------------------
 %% Internal interface
 %%---------------------------------------------------------------------------
 
-start_link(AmqpParams, SIF) ->
-    gen_server:start_link(?MODULE, [self(), AmqpParams, SIF], []).
+start_link(AmqpParams, SIF, AdapterInfo) ->
+    gen_server:start_link(?MODULE,
+                          [self(), AmqpParams, SIF, AdapterInfo], []).
 
 connect(Pid) ->
     gen_server:call(Pid, connect, infinity).
@@ -62,8 +67,9 @@ connect(Pid) ->
 %% gen_server callbacks
 %%---------------------------------------------------------------------------
 
-init([Sup, AmqpParams, SIF]) ->
+init([Sup, AmqpParams, SIF, AdapterInfo]) ->
     {ok, #state{sup                      = Sup,
+                adapter_info             = AdapterInfo,
                 params                   = AmqpParams,
                 start_infrastructure_fun = SIF}}.
 
@@ -73,7 +79,7 @@ handle_call({command, Command}, From, #state{closing = Closing} = State) ->
         _     -> {reply, closing, State}
     end;
 handle_call({info, Items}, _From, State) ->
-    {reply, [{Item, i(Item, State)} || Item <- Items], State};
+    {reply, infos(Items, State), State};
 handle_call(info_keys, _From, State) ->
     {reply, ?INFO_KEYS, State};
 handle_call(connect, _From, State) ->
@@ -111,6 +117,7 @@ handle_command({open_channel, ProposedNumber}, _From, State =
     {reply, amqp_channels_manager:open_channel(ChMgr, ProposedNumber,
                                                [User, VHost, Collector]),
      State};
+
 handle_command({close, Close}, From, State) ->
     {noreply, set_closing_state(flush, #closing{reason = app_initiated_close,
                                                 close  = Close,
@@ -121,13 +128,42 @@ handle_command({close, Close}, From, State) ->
 %% Infos
 %%---------------------------------------------------------------------------
 
-i(type,              _)     -> direct;
+infos(Items, State) ->
+    [{Item, i(Item, State)} || Item <- Items].
+
 i(server_properties, State) -> State#state.server_properties;
 i(is_closing,        State) -> State#state.closing =/= false;
 i(amqp_params,       State) -> State#state.params;
-i(num_channels,      State) -> amqp_channels_manager:num_channels(
+i(channels,          State) -> amqp_channels_manager:num_channels(
                                  State#state.channels_manager);
-i(Item,             _State) -> throw({bad_argument, Item}).
+i(pid,              _State) -> self();
+%% AMQP Params
+i(user,
+  #state{params = Params}) -> Params#amqp_params.username;
+i(vhost,
+  #state{params = Params}) -> Params#amqp_params.virtual_host;
+i(client_properties,
+  #state{params = Params}) -> Params#amqp_params.client_properties;
+%% Optional adapter info
+i(protocol, #state{adapter_info = #adapter_info{protocol = unknown}}) ->
+    protocol_info(?PROTOCOL);
+i(protocol, #state{adapter_info = AdapterInfo}) ->
+    protocol_info(AdapterInfo#adapter_info.protocol);
+i(address, #state{adapter_info = AdapterInfo}) ->
+    AdapterInfo#adapter_info.address;
+i(port, #state{adapter_info = AdapterInfo}) ->
+    AdapterInfo#adapter_info.port;
+i(peer_address, #state{adapter_info = AdapterInfo}) ->
+    AdapterInfo#adapter_info.peer_address;
+i(peer_port, #state{adapter_info = AdapterInfo}) ->
+    AdapterInfo#adapter_info.peer_port;
+
+i(Item, _State) -> throw({bad_argument, Item}).
+
+protocol_info(?PROTOCOL) ->
+    ?PROTOCOL:version();
+protocol_info(Protocol = {_Family, _Version}) ->
+    Protocol.
 
 %%---------------------------------------------------------------------------
 %% Closing
@@ -185,8 +221,8 @@ handle_all_channels_terminated(State = #state{closing = Closing,
 closing_to_reason(#closing{close = #'connection.close'{reply_code = 200}}) ->
     normal;
 closing_to_reason(#closing{reason = Reason,
-                           close = #'connection.close'{reply_code = Code,
-                                                       reply_text = Text}}) ->
+                           close  = #'connection.close'{reply_code = Code,
+                                                        reply_text = Text}}) ->
     {Reason, Code, Text}.
 
 send_error(#amqp_error{} = AmqpError, State) ->
@@ -209,6 +245,8 @@ do_connect(State0 = #state{params = #amqp_params{username = User,
     rabbit_access_control:check_vhost_access(
             #user{username = User, password = Pass}, VHost),
     State1 = start_infrastructure(State0),
+    rabbit_event:notify(connection_created,
+                        infos(?CREATION_EVENT_KEYS, State1)),
     State1#state{server_properties = rabbit_reader:server_properties()}.
 
 start_infrastructure(State = #state{start_infrastructure_fun = SIF}) ->

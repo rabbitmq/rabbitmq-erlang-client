@@ -36,15 +36,15 @@
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Type, InfraArgs, ChNumber) ->
+start_link(Driver, InfraArgs, ChNumber) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
     {ok, ChPid} = supervisor2:start_child(
                     Sup, {channel, {amqp_channel, start_link,
-                                    [Type, ChNumber,
-                                     start_writer_fun(Sup, Type, InfraArgs,
+                                    [Driver, ChNumber,
+                                     start_writer_fun(Sup, Driver, InfraArgs,
                                                       ChNumber)]},
                           intrinsic, brutal_kill, worker, [amqp_channel]}),
-    {ok, Framing} = start_framing(Sup, Type, ChPid),
+    {ok, Framing} = start_framing(Sup, Driver, ChPid),
     {ok, Sup, {ChPid, Framing}}.
 
 %%---------------------------------------------------------------------------
