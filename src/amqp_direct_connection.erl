@@ -32,7 +32,7 @@
 -export([start_link/3, connect/1]).
 -export([init/1, terminate/2, code_change/3, handle_call/3, handle_cast/2,
          handle_info/2]).
-%%-export([emit_stats/1]).
+-export([emit_stats/1]).
 
 -record(state, {sup,
                 params = #amqp_params{},
@@ -41,6 +41,7 @@
                 channels_manager,
                 closing = false,
                 server_properties,
+                stats_timer,
                 start_infrastructure_fun}).
 
 -record(closing, {reason,
@@ -49,8 +50,9 @@
 
 -define(CREATION_EVENT_KEYS, [pid, protocol, address, port, peer_address, peer_port,
                               user, vhost, client_properties]).
+-define(STATISTICS_KEYS, [pid, channels, state]).
 -define(INFO_KEYS,
-        (amqp_connection:info_keys() ++ ?CREATION_EVENT_KEYS)).
+        (amqp_connection:info_keys() ++ ?CREATION_EVENT_KEYS ++ ?STATISTICS_KEYS -- [pid])).
 
 %%---------------------------------------------------------------------------
 %% Internal interface
@@ -63,6 +65,18 @@ start_link(AmqpParams, SIF, AdapterInfo) ->
 connect(Pid) ->
     gen_server:call(Pid, connect, infinity).
 
+emit_stats(Pid) ->
+    gen_server:cast(Pid, emit_stats).
+
+ensure_stats_timer(State = #state{stats_timer = StatsTimer,
+                                  closing = false}) ->
+    Self = self(),
+    State#state{stats_timer = rabbit_event:ensure_stats_timer(
+                                StatsTimer,
+                                fun() -> emit_stats(Self) end)};
+ensure_stats_timer(State) ->
+    State.
+
 %%---------------------------------------------------------------------------
 %% gen_server callbacks
 %%---------------------------------------------------------------------------
@@ -71,12 +85,16 @@ init([Sup, AmqpParams, SIF, AdapterInfo]) ->
     {ok, #state{sup                      = Sup,
                 adapter_info             = AdapterInfo,
                 params                   = AmqpParams,
+                stats_timer              = rabbit_event:init_stats_timer(),
                 start_infrastructure_fun = SIF}}.
 
 handle_call({command, Command}, From, #state{closing = Closing} = State) ->
     case Closing of
-        false -> handle_command(Command, From, State);
-        _     -> {reply, closing, State}
+        false ->
+            State1 = ensure_stats_timer(State),
+            handle_command(Command, From, State1);
+        _ ->
+            {reply, closing, State}
     end;
 handle_call({info, Items}, _From, State) ->
     {reply, infos(Items, State), State};
@@ -85,6 +103,8 @@ handle_call(info_keys, _From, State) ->
 handle_call(connect, _From, State) ->
     {reply, ok, do_connect(State)}.
 
+handle_cast(emit_stats, State) ->
+    {noreply, internal_emit_stats(State)};
 handle_cast(Cast, State) ->
     {stop, {unexpected_cast, Cast}, State}.
 
@@ -137,6 +157,8 @@ i(amqp_params,       State) -> State#state.params;
 i(channels,          State) -> amqp_channels_manager:num_channels(
                                  State#state.channels_manager);
 i(pid,              _State) -> self();
+i(state, #state{closing = false}) -> running;
+i(state, _)                       -> closing;
 %% AMQP Params
 i(user,
   #state{params = Params}) -> Params#amqp_params.username;
@@ -237,7 +259,8 @@ send_error(#amqp_error{} = AmqpError, State) ->
 
 do_connect(State0 = #state{params = #amqp_params{username = User,
                                                  password = Pass,
-                                                 virtual_host = VHost}}) ->
+                                                 virtual_host = VHost},
+                          stats_timer = StatsTimer}) ->
     case lists:keymember(rabbit, 1, application:which_applications()) of
         true  -> ok;
         false -> exit(broker_not_found_in_vm)
@@ -248,8 +271,16 @@ do_connect(State0 = #state{params = #amqp_params{username = User,
     State1 = start_infrastructure(State0),
     rabbit_event:notify(connection_created,
                         infos(?CREATION_EVENT_KEYS, State1)),
-    State1#state{server_properties = rabbit_reader:server_properties()}.
+    rabbit_event:if_enabled(StatsTimer,
+                            fun() -> internal_emit_stats(State1) end),
+    State2 = ensure_stats_timer(State1),
+    State2#state{server_properties = rabbit_reader:server_properties()}.
 
 start_infrastructure(State = #state{start_infrastructure_fun = SIF}) ->
     {ok, {ChMgr, Collector}} = SIF(),
     State#state{channels_manager = ChMgr, collector = Collector}.
+
+internal_emit_stats(State = #state{stats_timer = StatsTimer}) ->
+    io:format("~w", [infos(?STATISTICS_KEYS, State)]),
+    rabbit_event:notify(connection_stats, infos(?STATISTICS_KEYS, State)),
+    State#state{stats_timer = rabbit_event:reset_stats_timer(StatsTimer)}.
