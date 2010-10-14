@@ -99,7 +99,7 @@ start(Type) ->
 %% a RabbitMQ server, assuming that the server is running in the same process
 %% space.
 start(direct, AmqpParams) ->
-    start({direct, #adapter_info{protocol={'AMQP (direct)', ?PROTOCOL:version()}}}, AmqpParams);
+    start({direct, #adapter_info{}}, AmqpParams);
 start(Type, AmqpParams) ->
     amqp_client:start(),
     {ok, _Sup, Connection} =

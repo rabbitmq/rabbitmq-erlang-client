@@ -81,9 +81,24 @@ ensure_stats_timer(State) ->
 %% gen_server callbacks
 %%---------------------------------------------------------------------------
 
-init([Sup, AmqpParams, SIF, AdapterInfo]) ->
+info_default(unknown, Default) ->
+    Default;
+info_default(Value, _) ->
+    Value.
+
+init([Sup, AmqpParams, SIF, Info]) ->
+    %% If there's no adapter values given, fill them in
     {ok, #state{sup                      = Sup,
-                adapter_info             = AdapterInfo,
+                adapter_info             = #adapter_info{
+                  peer_address = info_default(Info#adapter_info.peer_address,
+                                              node()),
+                  peer_port    = info_default(Info#adapter_info.peer_port, self()),
+                  protocol     = info_default(Info#adapter_info.protocol,
+                                              {"AMQP (direct mode)",
+                                               ?PROTOCOL:version()}),
+                  address      = info_default(Info#adapter_info.address,
+                                              node()),
+                  port         = info_default(Info#adapter_info.port, direct)},
                 params                   = AmqpParams,
                 stats_timer              = rabbit_event:init_stats_timer(),
                 start_infrastructure_fun = SIF}}.
@@ -281,6 +296,5 @@ start_infrastructure(State = #state{start_infrastructure_fun = SIF}) ->
     State#state{channels_manager = ChMgr, collector = Collector}.
 
 internal_emit_stats(State = #state{stats_timer = StatsTimer}) ->
-    io:format("~w", [infos(?STATISTICS_KEYS, State)]),
     rabbit_event:notify(connection_stats, infos(?STATISTICS_KEYS, State)),
     State#state{stats_timer = rabbit_event:reset_stats_timer(StatsTimer)}.
