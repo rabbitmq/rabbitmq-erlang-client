@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2010 VMware, Inc.  All rights reserved.
+%% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
 %%
 
 %% @private
@@ -39,12 +39,7 @@ start_link_direct() ->
 
 start_link_network(Sock, Connection, ChMgr) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
-    {ok, Framing} =
-        supervisor2:start_child(
-          Sup,
-          {framing, {rabbit_framing_channel, start_link,
-                     [Connection, Connection, ?PROTOCOL]},
-           transient, ?MAX_WAIT, worker, [rabbit_framing_channel]}),
+    {ok, AState} = rabbit_command_assembler:init(?PROTOCOL),
     {ok, Writer} =
         supervisor2:start_child(
           Sup,
@@ -55,29 +50,12 @@ start_link_network(Sock, Connection, ChMgr) ->
         supervisor2:start_child(
           Sup,
           {main_reader, {amqp_main_reader, start_link,
-                         [Sock, Connection, ChMgr, Framing]},
+                         [Sock, Connection, ChMgr, AState]},
            transient, ?MAX_WAIT, worker, [amqp_main_reader]}),
-    {ok, Sup, {MainReader, Framing, Writer}}.
+    {ok, Sup, {MainReader, AState, Writer}}.
 
-start_heartbeat_fun(Sup) ->
-    fun (_Sock, 0) ->
-            none;
-        (Sock, Timeout) ->
-            Connection = self(),
-            {ok, _} = supervisor2:start_child(
-                        Sup,
-                        {heartbeat_sender, {rabbit_heartbeat,
-                                            start_heartbeat_sender,
-                                            [Connection, Sock, Timeout]},
-                         transient, ?MAX_WAIT, worker, [rabbit_heartbeat]}),
-            {ok, _} = supervisor2:start_child(
-                        Sup,
-                        {heartbeat_receiver, {rabbit_heartbeat,
-                                              start_heartbeat_receiver,
-                                              [Connection, Sock, Timeout]},
-                         transient, ?MAX_WAIT, worker, [rabbit_heartbeat]}),
-            ok
-    end.
+start_heartbeat_fun(SupPid) ->
+    rabbit_heartbeat:start_heartbeat_fun(SupPid).
 
 %%---------------------------------------------------------------------------
 %% supervisor2 callbacks
