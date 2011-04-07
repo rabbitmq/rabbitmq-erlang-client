@@ -50,7 +50,6 @@ start_writer_fun(_Sup, direct, [ConnectionPid, Node, User, VHost, Collector],
                 rpc:call(Node, rabbit_direct, start_channel,
                          [ChNumber, self(), ConnectionPid, ?PROTOCOL, User,
                           VHost, ?CLIENT_CAPABILITIES, Collector]),
-            link(RabbitCh),
             {ok, RabbitCh}
     end;
 start_writer_fun(Sup, network, [Sock], ChNumber) ->
