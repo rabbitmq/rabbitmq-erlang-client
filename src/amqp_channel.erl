@@ -428,7 +428,10 @@ handle_info({'DOWN', _, process, DefaultConsumer, Reason},
             State = #state{default_consumer = DefaultConsumer}) ->
     ?LOG_WARN("Channel (~p): Unregistering default consumer ~p because it died."
               "Reason: ~p~n", [self(), DefaultConsumer, Reason]),
-    {noreply, State#state{default_consumer = none}}.
+    {noreply, State#state{default_consumer = none}};
+%% @private
+handle_info({'EXIT', _Pid, Reason}, State) ->
+    {stop, Reason, State}.
 
 %% @private
 terminate(_Reason, #state{driver = direct, writer = RabbitChannel}) ->
