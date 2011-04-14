@@ -295,6 +295,7 @@ open(Pid) ->
 
 %% @private
 init([Driver, Connection, ChannelNumber, SWF]) ->
+    process_flag(trap_exit, true),
     {ok, #state{connection       = Connection,
                 driver           = Driver,
                 number           = ChannelNumber,
@@ -401,6 +402,10 @@ handle_info(timed_out_waiting_close_ok, State) ->
               "channel.close_ok while connection closing~n", [self()]),
     {stop, timed_out_waiting_close_ok, State};
 %% @private
+handle_info({'DOWN', _, process, RabbitCh, Reason},
+            State = #state{driver = direct, writer = RabbitCh}) ->
+    {stop, {rabbit_channel_died, Reason}, State};
+%% @private
 handle_info({'DOWN', _, process, ReturnHandler, Reason},
             State = #state{return_handler_pid = ReturnHandler}) ->
     ?LOG_WARN("Channel (~p): Unregistering return handler ~p because it died. "
@@ -425,6 +430,9 @@ handle_info({'DOWN', _, process, DefaultConsumer, Reason},
               "Reason: ~p~n", [self(), DefaultConsumer, Reason]),
     {noreply, State#state{default_consumer = none}}.
 
+%% @private
+terminate(_Reason, #state{driver = direct, writer = RabbitChannel}) ->
+    rabbit_channel:shutdown(RabbitChannel);
 %% @private
 terminate(_Reason, _State) ->
     ok.
@@ -761,8 +769,13 @@ do(Method, Content, #state{driver = Driver, writer = W}) ->
               {direct, _}     -> rabbit_channel:do(W, Method, Content)
           end.
 
-start_writer(State = #state{start_writer_fun = SWF}) ->
+start_writer(State = #state{start_writer_fun = SWF,
+                            driver = Driver}) ->
     {ok, Writer} = SWF(),
+    case Driver of
+        direct  -> erlang:monitor(process, Writer);
+        network -> ok
+    end,
     State#state{writer = Writer}.
 
 resolve_consumer(_ConsumerTag, #state{consumers = []}) ->
