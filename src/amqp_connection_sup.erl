@@ -21,17 +21,17 @@
 
 -behaviour(supervisor2).
 
--export([start_link/3]).
+-export([start_link/2]).
 -export([init/1]).
 
 %%---------------------------------------------------------------------------
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Type, Module, AmqpParams) ->
+start_link(Module, AmqpParams) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
-    SChMF = start_channels_manager_fun(Sup, Type),
-    SIF = start_infrastructure_fun(Sup, Type),
+    SChMF = start_channels_manager_fun(Sup, AmqpParams),
+    SIF = start_infrastructure_fun(Sup, AmqpParams),
     {ok, Connection} = supervisor2:start_child(
                          Sup,
                          {connection, {amqp_gen_connection, start_link,
@@ -44,7 +44,7 @@ start_link(Type, Module, AmqpParams) ->
 %% Internal plumbing
 %%---------------------------------------------------------------------------
 
-start_infrastructure_fun(Sup, network) ->
+start_infrastructure_fun(Sup, #amqp_params_network{}) ->
     fun (Sock, ChMgr) ->
             Connection = self(),
             {ok, CTSup, {MainReader, AState, Writer}} =
@@ -58,7 +58,7 @@ start_infrastructure_fun(Sup, network) ->
             {ok, {MainReader, AState, Writer,
                   amqp_connection_type_sup:start_heartbeat_fun(CTSup)}}
     end;
-start_infrastructure_fun(Sup, direct) ->
+start_infrastructure_fun(Sup, #amqp_params_direct{}) ->
     fun () ->
             {ok, _CTSup, Collector} =
                 supervisor2:start_child(
@@ -70,13 +70,13 @@ start_infrastructure_fun(Sup, direct) ->
             {ok, Collector}
     end.
 
-start_channels_manager_fun(Sup, Type) ->
+start_channels_manager_fun(Sup, AmqpParams) ->
     fun () ->
             Connection = self(),
             {ok, ChSupSup} = supervisor2:start_child(
                        Sup,
                        {channel_sup_sup, {amqp_channel_sup_sup, start_link,
-                                          [Type, Connection]},
+                                          [AmqpParams, Connection]},
                         intrinsic, infinity, supervisor,
                         [amqp_channel_sup_sup]}),
             {ok, _} = supervisor2:start_child(

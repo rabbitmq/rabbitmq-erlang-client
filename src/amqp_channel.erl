@@ -82,7 +82,7 @@
 
 -record(state, {number,
                 connection,
-                driver,
+                params,
                 rpc_requests        = queue:new(),
                 anon_sub_requests   = queue:new(),
                 tagged_sub_requests = dict:new(),
@@ -277,9 +277,9 @@ register_default_consumer(Channel, Consumer) ->
 %%---------------------------------------------------------------------------
 
 %% @private
-start_link(Driver, Connection, ChannelNumber, SWF) ->
+start_link(AmqpParams, Connection, ChannelNumber, SWF) ->
     gen_server:start_link(?MODULE,
-                          [Driver, Connection, ChannelNumber, SWF], []).
+                          [AmqpParams, Connection, ChannelNumber, SWF], []).
 
 %% @private
 connection_closing(Pid, ChannelCloseType, Reason) ->
@@ -294,9 +294,9 @@ open(Pid) ->
 %%---------------------------------------------------------------------------
 
 %% @private
-init([Driver, Connection, ChannelNumber, SWF]) ->
+init([AmqpParams, Connection, ChannelNumber, SWF]) ->
     {ok, #state{connection       = Connection,
-                driver           = Driver,
+                params           = AmqpParams,
                 number           = ChannelNumber,
                 start_writer_fun = SWF}}.
 
@@ -751,14 +751,17 @@ handle_shutdown(Reason, State) ->
 %% Internal plumbing
 %%---------------------------------------------------------------------------
 
-do(Method, Content, #state{driver = Driver, writer = W}) ->
+do(Method, Content, #state{params = Params, writer = W}) ->
     %% Catching because it expects the {channel_exit, _, _} message on error
-    catch case {Driver, Content} of
-              {network, none} -> rabbit_writer:send_command_sync(W, Method);
-              {network, _}    -> rabbit_writer:send_command_sync(W, Method,
-                                                                 Content);
-              {direct, none}  -> rabbit_channel:do(W, Method);
-              {direct, _}     -> rabbit_channel:do(W, Method, Content)
+    catch case {Params, Content} of
+              {#amqp_params_network{}, none} ->
+                  rabbit_writer:send_command_sync(W, Method);
+              {#amqp_params_network{}, _} ->
+                  rabbit_writer:send_command_sync(W, Method, Content);
+              {#amqp_params_direct{}, none} ->
+                  rabbit_channel:do(W, Method);
+              {#amqp_params_direct{}, _} ->
+                  rabbit_channel:do(W, Method, Content)
           end.
 
 start_writer(State = #state{start_writer_fun = SWF}) ->

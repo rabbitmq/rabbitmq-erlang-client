@@ -28,23 +28,23 @@
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Type, Connection, InfraArgs, ChNumber) ->
+start_link(AmqpParams, Connection, InfraArgs, ChNumber) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
     {ok, ChPid} = supervisor2:start_child(
                     Sup, {channel, {amqp_channel, start_link,
-                                    [Type, Connection, ChNumber,
-                                     start_writer_fun(Sup, Type, InfraArgs,
-                                                      ChNumber)]},
+                                    [AmqpParams, Connection, ChNumber,
+                                     start_writer_fun(Sup, AmqpParams,
+                                                      InfraArgs, ChNumber)]},
                           intrinsic, brutal_kill, worker, [amqp_channel]}),
-    {ok, AState} = init_command_assembler(Type),
+    {ok, AState} = init_command_assembler(AmqpParams),
     {ok, Sup, {ChPid, AState}}.
 
 %%---------------------------------------------------------------------------
 %% Internal plumbing
 %%---------------------------------------------------------------------------
 
-start_writer_fun(_Sup, direct, [ConnectionPid, Node, User, VHost, Collector],
-                 ChNumber) ->
+start_writer_fun(_Sup, #amqp_params_direct{},
+                 [ConnectionPid, Node, User, VHost, Collector], ChNumber) ->
     fun () ->
             {ok, RabbitCh} =
                 rpc:call(Node, rabbit_direct, start_channel,
@@ -53,7 +53,7 @@ start_writer_fun(_Sup, direct, [ConnectionPid, Node, User, VHost, Collector],
             link(RabbitCh),
             {ok, RabbitCh}
     end;
-start_writer_fun(Sup, network, [Sock], ChNumber) ->
+start_writer_fun(Sup, #amqp_params_network{}, [Sock], ChNumber) ->
     fun () ->
             {ok, _} = supervisor2:start_child(
                         Sup,
@@ -63,8 +63,10 @@ start_writer_fun(Sup, network, [Sock], ChNumber) ->
                          transient, ?MAX_WAIT, worker, [rabbit_writer]})
     end.
 
-init_command_assembler(direct)  -> {ok, none};
-init_command_assembler(network) -> rabbit_command_assembler:init(?PROTOCOL).
+init_command_assembler(#amqp_params_direct{}) ->
+    {ok, none};
+init_command_assembler(#amqp_params_network{}) ->
+    rabbit_command_assembler:init(?PROTOCOL).
 
 %%---------------------------------------------------------------------------
 %% supervisor2 callbacks

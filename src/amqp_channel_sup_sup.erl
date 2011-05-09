@@ -28,8 +28,8 @@
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Type, Connection) ->
-    supervisor2:start_link(?MODULE, [Type, Connection]).
+start_link(AmqpParams, Connection) ->
+    supervisor2:start_link(?MODULE, [AmqpParams, Connection]).
 
 start_channel_sup(Sup, InfraArgs, ChannelNumber) ->
     supervisor2:start_child(Sup, [InfraArgs, ChannelNumber]).
@@ -38,7 +38,8 @@ start_channel_sup(Sup, InfraArgs, ChannelNumber) ->
 %% supervisor2 callbacks
 %%---------------------------------------------------------------------------
 
-init([Type, Connection]) ->
+init([AmqpParams, Connection]) ->
     {ok, {{simple_one_for_one, 0, 1},
-          [{channel_sup, {amqp_channel_sup, start_link, [Type, Connection]},
+          [{channel_sup,
+            {amqp_channel_sup, start_link, [AmqpParams, Connection]},
             temporary, brutal_kill, supervisor, [amqp_channel_sup]}]}}.
