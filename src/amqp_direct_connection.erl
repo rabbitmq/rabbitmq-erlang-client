@@ -114,7 +114,9 @@ connect(Params = #amqp_params_direct{username     = Username,
         {error, _} = E ->
             E;
         {badrpc, nodedown} ->
-            {error, {nodedown, Node}}
+            {error, {nodedown, Node}};
+        {badrpc, Reason} ->
+            {error, {badrpc, Reason}}
     end.
 
 ensure_adapter_info(none) ->

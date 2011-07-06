@@ -114,6 +114,20 @@ confirm_test() ->
 subscribe_nowait_test() ->
     test_util:subscribe_nowait_test(new_connection()).
 
+connection_errors_test() ->
+    {timeout, 60,
+     fun() ->
+             test_util:connection_errors_test(
+               [amqp_connection:start(#amqp_params_network
+                                      {virtual_host = <<"/non-existing">>}),
+                amqp_connection:start(#amqp_params_network
+                                      {virtual_host = <<"/no-access">>}),
+                amqp_connection:start(
+                  #amqp_params_network{password = <<"meh">>})]),
+             {error, econnrefused} =
+                 amqp_connection:start(#amqp_params_network{port = 10000})
+     end}.
+
 %%---------------------------------------------------------------------------
 %% Negative Tests
 

@@ -100,6 +100,15 @@ confirm_test() ->
 subscribe_nowait_test() ->
     test_util:subscribe_nowait_test(new_connection()).
 
+connection_errors_test() ->
+    test_util:connection_errors_test(
+      [new_connection(#amqp_params_direct{
+                         virtual_host = <<"/non-existing">>}),
+       new_connection(#amqp_params_direct{
+                         virtual_host = <<"/no-access">>}),
+       new_connection(#amqp_params_direct{username = <<"meh">>})]),
+    {error, {badrpc, _}} = amqp_connection:start(#amqp_params_direct{}).
+
 %%---------------------------------------------------------------------------
 %% Negative Tests
 %%---------------------------------------------------------------------------

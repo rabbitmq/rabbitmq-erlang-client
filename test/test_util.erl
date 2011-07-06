@@ -671,6 +671,18 @@ rpc_test(Connection) ->
 
 %%---------------------------------------------------------------------------
 
+connection_errors_test(Errors) ->
+    Expected = [{error, access_refused},
+                {error, access_refused},
+                {error, auth_failure}],
+    case Errors of
+        Expected -> ok;
+        Got      -> io:format("was expecting ~p; got ~p~n", [Expected, Got]),
+                    fail
+    end.
+
+%%---------------------------------------------------------------------------
+
 setup_publish(Channel) ->
     Publish = #publish{routing_key = <<"a.b.c.d">>,
                        q = uuid(),
