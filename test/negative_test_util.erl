@@ -63,16 +63,27 @@ hard_error_test(Connection) ->
     OtherChannelMonitor = erlang:monitor(process, OtherChannel),
     Qos = #'basic.qos'{global = true},
     case amqp_channel:call(Channel, Qos) of
+        %% Direct case
+        {error, {server_protocol_error, ?NOT_IMPLEMENTED, _}} -> ok;
+        %% Network case
         {error, #'connection.close'{reply_code = ?NOT_IMPLEMENTED}} -> ok;
-        E ->
-            io:format("Instead, got: ~p~n", [E]),
-            exit(expected_to_exit)
+        E -> io:format("Instead, got: ~p~n", [E]),
+             exit(expected_to_exit)
     end,
     receive
         {'DOWN', OtherChannelMonitor, process, OtherChannel, OtherExit} ->
-            ?assertMatch({shutdown,
-                          #'connection.close'{reply_code = ?NOT_IMPLEMENTED}},
-                         OtherExit)
+            case OtherExit of
+                {shutdown, #'connection.close'{}} ->
+                    ?assertMatch({shutdown,
+                                  #'connection.close'{
+                                    reply_code = ?NOT_IMPLEMENTED}},
+                                 OtherExit);
+                {shutdown, {server_protocol_error, _, _}} ->
+                    ?assertMatch({shutdown,
+                                  {server_protocol_error,
+                                   ?NOT_IMPLEMENTED, _}},
+                                 OtherExit)
+            end
     end,
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection).
