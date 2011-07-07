@@ -254,7 +254,8 @@ handle_method(#'connection.close_ok'{}, State = #state{closing = Closing}) ->
     case Closing of #closing{from = none} -> ok;
                     #closing{from = From} -> gen_server:reply(From, ok)
     end,
-    {stop, {shutdown, closing_to_reason(Closing)}, State};
+    #closing{close = ClosingReason} = Closing,
+    {stop, {shutdown, ClosingReason}, State};
 handle_method(Other, State) ->
     server_misbehaved_close(#amqp_error{name        = command_invalid,
                                         explanation = "unexpected method on "
@@ -300,7 +301,7 @@ set_closing_state(ChannelCloseType, NewClosing,
             true  -> NewClosing;
             false -> CurClosing
         end,
-    ClosingReason = closing_to_reason(ResClosing),
+    #closing{close = ClosingReason} = ResClosing,
     amqp_channels_manager:signal_connection_closing(ChMgr, ChannelCloseType,
                                                     ClosingReason),
     callback(closing, [ChannelCloseType, ClosingReason],
@@ -311,11 +312,6 @@ closing_priority(#closing{reason = app_initiated_close})    -> 4;
 closing_priority(#closing{reason = internal_error})         -> 3;
 closing_priority(#closing{reason = server_misbehaved})      -> 2;
 closing_priority(#closing{reason = server_initiated_close}) -> 1.
-
-closing_to_reason(#closing{close = #'connection.close'{reply_code = 200}}) ->
-    normal;
-closing_to_reason(#closing{reason = Reason, close = Close}) ->
-    Close.
 
 handle_channels_terminated(State = #state{closing = Closing,
                                           module = Mod,

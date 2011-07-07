@@ -740,9 +740,10 @@ handle_channel_exit(Reason, State = #state{connection = Connection}) ->
             {stop, {infrastructure_died, Reason}, State}
     end.
 
-handle_shutdown({_, 200, _}, State) ->
+handle_shutdown({app_initiated_close, 200, _}, State) ->
     {stop, normal, State};
-handle_shutdown({connection_closing, normal}, State) ->
+handle_shutdown({connection_closing, #'connection.close'{reply_code = 200}},
+                State) ->
     {stop, normal, State};
 handle_shutdown({connection_closing, ConnectionClose}, State) ->
     {stop, {shutdown, ConnectionClose}, State};
