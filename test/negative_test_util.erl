@@ -197,14 +197,16 @@ connection_errors_test(Errors) ->
 channel_errors_test(Connection) ->
     ok = with_channel(fun test_exchange_redeclare/1, Connection),
     ok = with_channel(fun test_queue_redeclare/1, Connection),
-    ok = with_channel(fun test_bad_exchange/1, Connection).
+    ok = with_channel(fun test_bad_exchange/1, Connection),
+    test_util:wait_for_death(Connection).
 
-%% Declare an exchange with a non-existent type
+%% Declare an exchange with a non-existent type.  Hard-error.
 test_bad_exchange(Channel) ->
     ?assertMatch({error, #'connection.close'{}},
                  amqp_channel:call(Channel,
                                    #'exchange.declare'{exchange = <<"foo">>,
-                                                       type = <<"driect">>})).
+                                                       type = <<"driect">>})),
+    test_util:wait_for_death(Channel).
 
 %% Redeclare an exchange with the wrong type
 test_exchange_redeclare(Channel) ->
@@ -216,7 +218,7 @@ test_exchange_redeclare(Channel) ->
                  amqp_channel:call(Channel,
                                    #'exchange.declare'{exchange = <<"bar">>,
                                                        type = <<"direct">>})),
-    ok.
+    test_util:wait_for_death(Channel).
 
 %% Redeclare a queue with the wrong type
 test_queue_redeclare(Channel) ->
@@ -227,7 +229,7 @@ test_queue_redeclare(Channel) ->
                  amqp_channel:call(
                    Channel, #'queue.declare'{queue = <<"foo">>,
                                              durable = true})),
-    ok.
+    test_util:wait_for_death(Channel).
 
 with_channel(Fun, Connection) ->
     {ok, Channel} = amqp_connection:open_channel(Connection),
