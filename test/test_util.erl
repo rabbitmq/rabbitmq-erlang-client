@@ -399,8 +399,10 @@ simultaneous_close_test(Connection) ->
     try amqp_channel:close(Channel1) of
         closing -> wait_for_death(Channel1)
     catch
-        exit:{noproc, _}                                              -> ok;
-        exit:{{shutdown, {server_initiated_close, ?NOT_FOUND, _}}, _} -> ok
+        exit:{noproc, _} ->
+            ok;
+        exit:{{shutdown, #'channel.close'{reply_code = ?NOT_FOUND}}, _} ->
+            ok
     end,
 
     %% Channel2 (opened with the exact same number as Channel1)

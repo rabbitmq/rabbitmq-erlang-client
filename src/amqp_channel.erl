@@ -597,20 +597,14 @@ handle_method_from_server(Method, Content, State = #state{closing = Closing}) ->
 
 handle_method_from_server1(#'channel.open_ok'{}, none, State) ->
     {noreply, rpc_bottom_half(ok, State)};
-handle_method_from_server1(#'channel.close'{reply_code = Code,
-                                            reply_text = Text},
-                           none,
+handle_method_from_server1(ChannelClose = #'channel.close'{}, none,
                            State = #state{closing = {just_channel, _}}) ->
     %% Both client and server sent close at the same time. Don't shutdown yet,
     %% wait for close_ok.
     do(#'channel.close_ok'{}, none, State),
     erlang:send_after(?TIMEOUT_CLOSE_OK, self(), timed_out_waiting_close_ok),
-    {noreply,
-     State#state{
-         closing = {just_channel, {server_initiated_close, Code, Text}}}};
-handle_method_from_server1(ChannelClose = #'channel.close'{reply_code = Code,
-                                                           reply_text = Text},
-                           none, State) ->
+    {noreply, State#state{closing = {just_channel, ChannelClose}}};
+handle_method_from_server1(ChannelClose = #'channel.close'{}, none, State) ->
     do(#'channel.close_ok'{}, none, State),
     handle_shutdown(ChannelClose, State);
 handle_method_from_server1(#'channel.close_ok'{}, none,
@@ -618,9 +612,8 @@ handle_method_from_server1(#'channel.close_ok'{}, none,
     case Closing of
         {just_channel, {app_initiated_close, _, _} = Reason} ->
             handle_shutdown(Reason, rpc_bottom_half(ok, State));
-        {just_channel, {server_initiated_close, _, _} = Reason} ->
-            handle_shutdown(Reason,
-                            rpc_bottom_half(closing, State));
+        {just_channel, #'channel.close'{} = Reason} ->
+            handle_shutdown(Reason, rpc_bottom_half(closing, State));
         {connection, Reason} ->
             handle_shutdown({connection_closing, Reason}, State)
     end;

@@ -160,7 +160,7 @@ maybe_report_down(_Pid, normal, _State) ->
     ok;
 maybe_report_down(_Pid, {app_initiated_close, _, _}, _State) ->
     ok;
-maybe_report_down(_Pid, {server_initiated_close, _, _}, _State) ->
+maybe_report_down(_Pid, #'channel.close'{}, _State) ->
     ok;
 maybe_report_down(_Pid, {connection_closing, _}, _State) ->
     ok;
