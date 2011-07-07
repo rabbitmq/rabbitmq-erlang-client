@@ -201,31 +201,32 @@ channel_errors_test(Connection) ->
 
 %% Declare an exchange with a non-existent type
 test_bad_exchange(Channel) ->
-    Result = amqp_channel:call(Channel,
-                               #'exchange.declare'{exchange = <<"test_y">>,
-                                                   type = <<"driect">>}),
-    ?assertMatch(Result, {error, #'connection.close'{}}).
+    ?assertMatch({error, #'connection.close'{}},
+                 amqp_channel:call(Channel,
+                                   #'exchange.declare'{exchange = <<"foo">>,
+                                                       type = <<"driect">>})).
 
 %% Redeclare an exchange with the wrong type
 test_exchange_redeclare(Channel) ->
     #'exchange.declare_ok'{} =
         amqp_channel:call(
-          Channel, #'exchange.declare'{exchange= <<"test_x">>,
+          Channel, #'exchange.declare'{exchange= <<"bar">>,
                                        type = <<"topic">>}),
-    {error, #'channel.close'{}} =
-        amqp_channel:call(Channel,
-                          #'exchange.declare'{exchange = <<"test_x">>,
-                                              type = <<"direct">>}),
+    ?assertMatch({error, #'channel.close'{}},
+                 amqp_channel:call(Channel,
+                                   #'exchange.declare'{exchange = <<"bar">>,
+                                                       type = <<"direct">>})),
     ok.
 
 %% Redeclare a queue with the wrong type
 test_queue_redeclare(Channel) ->
     #'queue.declare_ok'{} =
         amqp_channel:call(
-          Channel, #'queue.declare'{queue = <<"test_q">>}),
-    {error, #'channel.close'{}} =
-        amqp_channel:call(
-          Channel, #'queue.declare'{queue = <<"test_q">>, durable = true}),
+          Channel, #'queue.declare'{queue = <<"foo">>}),
+    ?assertMatch({error, #'channel.close'{}},
+                 amqp_channel:call(
+                   Channel, #'queue.declare'{queue = <<"foo">>,
+                                             durable = true})),
     ok.
 
 with_channel(Fun, Connection) ->
