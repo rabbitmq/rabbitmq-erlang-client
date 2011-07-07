@@ -719,12 +719,14 @@ handle_connection_closing(CloseType, Reason,
 
 handle_channel_exit(Reason, State = #state{connection = Connection}) ->
     case Reason of
-        %% Sent by rabbit_channel in the direct case
+        %% Sent by rabbit_channel in the direct case when the server
+        %% sends a frame that annoys rabbit_command_assembler in some
+        %% way.
         #amqp_error{name = ErrorName, explanation = Expl} ->
             ?LOG_WARN("Channel (~p) closing: server sent error ~p~n",
                       [self(), Reason]),
             {IsHard, Code, _} = ?PROTOCOL:lookup_amqp_exception(ErrorName),
-            ReportedReason = {server_initiated_close, Code, Expl},
+            ReportedReason = {server_protocol_error, Code, Expl},
             handle_shutdown(
                 if IsHard ->
                              amqp_gen_connection:hard_error_in_channel(
