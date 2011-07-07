@@ -744,12 +744,15 @@ handle_channel_exit(Reason, State = #state{connection = Connection}) ->
             {stop, {infrastructure_died, Reason}, State}
     end.
 
+%% FIXME: One or more of the first three reasons cannot happen.
 handle_shutdown({_, 200, _}, State) ->
     {stop, normal, State};
 handle_shutdown({connection_closing, {_, 200, _}}, State) ->
     {stop, normal, State};
 handle_shutdown({connection_closing, normal}, State) ->
     {stop, normal, State};
+handle_shutdown({connection_closing, ConnectionClose}, State) ->
+    {stop, {shutdown, ConnectionClose}, State};
 handle_shutdown(Reason, State) ->
     {stop, {shutdown, Reason}, State}.
 

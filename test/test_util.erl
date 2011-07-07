@@ -669,46 +669,6 @@ rpc_test(Connection) ->
     wait_for_death(Connection),
     ok.
 
-%%---------------------------------------------------------------------------
-
-connection_errors_test(Errors) ->
-    Expected = [{error, access_refused},
-                {error, access_refused},
-                {error, auth_failure}],
-    case Errors of
-        Expected -> ok;
-        Got      -> io:format("was expecting ~p; got ~p~n", [Expected, Got]),
-                    fail
-    end.
-
-channel_errors_test(Connection) ->
-    ok = with_channel(fun test_exchange_redeclare/1, Connection),
-    ok = with_channel(fun test_queue_redeclare/1, Connection).
-
-%% Redeclare an exchange with the wrong type
-test_exchange_redeclare(Channel) ->
-    #'exchange.declare_ok'{} =
-        amqp_channel:call(
-          Channel, #'exchange.declare'{exchange= <<"test_x">>,
-                                       type = <<"topic">>}),
-    {error, #'channel.close'{}} =
-        amqp_channel:call(Channel, #'exchange.declare'{exchange= <<"test_x">>,
-                                                       type = <<"direct">>}),
-    ok.
-
-%% Redeclare a queue with the wrong type
-test_queue_redeclare(Channel) ->
-    #'queue.declare_ok'{} =
-        amqp_channel:call(
-          Channel, #'queue.declare'{queue = <<"test_q">>}),
-    {error, #'channel.close'{}} =
-        amqp_channel:call(
-          Channel, #'queue.declare'{queue = <<"test_q">>, durable = true}),
-    ok.
-
-with_channel(Fun, Connection) ->
-    {ok, Channel} = amqp_connection:open_channel(Connection),
-    Fun(Channel).
 
 %%---------------------------------------------------------------------------
 

@@ -314,12 +314,7 @@ closing_priority(#closing{reason = server_initiated_close}) -> 1.
 
 closing_to_reason(#closing{close = #'connection.close'{reply_code = 200}}) ->
     normal;
-closing_to_reason(#closing{reason = Reason,
-                           close = #'connection.close'{reply_code = Code,
-                                                       reply_text = Text}}) ->
-    {Reason, Code, Text};
-closing_to_reason(#closing{reason = Reason,
-                           close = {Reason, _Code, _Text} = Close}) ->
+closing_to_reason(#closing{reason = Reason, close = Close}) ->
     Close.
 
 handle_channels_terminated(State = #state{closing = Closing,
