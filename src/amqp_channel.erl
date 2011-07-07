@@ -726,7 +726,8 @@ handle_channel_exit(Reason, State = #state{connection = Connection}) ->
             ?LOG_WARN("Channel (~p) closing: server sent error ~p~n",
                       [self(), Reason]),
             {IsHard, Code, _} = ?PROTOCOL:lookup_amqp_exception(ErrorName),
-            ReportedReason = {server_protocol_error, Code, Expl},
+            ReportedReason = #'connection.close'{reply_code = Code,
+                                                 reply_text = Expl},
             handle_shutdown(
                 if IsHard ->
                              amqp_gen_connection:hard_error_in_channel(

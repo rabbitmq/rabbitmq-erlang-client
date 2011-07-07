@@ -63,8 +63,6 @@ hard_error_test(Connection) ->
     OtherChannelMonitor = erlang:monitor(process, OtherChannel),
     Qos = #'basic.qos'{global = true},
     case amqp_channel:call(Channel, Qos) of
-        %% Direct case
-        {error, {server_protocol_error, ?NOT_IMPLEMENTED, _}} -> ok;
         %% Network case
         {error, #'connection.close'{reply_code = ?NOT_IMPLEMENTED}} -> ok;
         E -> io:format("Instead, got: ~p~n", [E]),
@@ -72,18 +70,9 @@ hard_error_test(Connection) ->
     end,
     receive
         {'DOWN', OtherChannelMonitor, process, OtherChannel, OtherExit} ->
-            case OtherExit of
-                {shutdown, #'connection.close'{}} ->
-                    ?assertMatch({shutdown,
-                                  #'connection.close'{
-                                    reply_code = ?NOT_IMPLEMENTED}},
-                                 OtherExit);
-                {shutdown, {server_protocol_error, _, _}} ->
-                    ?assertMatch({shutdown,
-                                  {server_protocol_error,
-                                   ?NOT_IMPLEMENTED, _}},
-                                 OtherExit)
-            end
+            ?assertMatch({shutdown,
+                          #'connection.close'{reply_code = ?NOT_IMPLEMENTED}},
+                         OtherExit)
     end,
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection).
@@ -207,7 +196,15 @@ connection_errors_test(Errors) ->
 
 channel_errors_test(Connection) ->
     ok = with_channel(fun test_exchange_redeclare/1, Connection),
-    ok = with_channel(fun test_queue_redeclare/1, Connection).
+    ok = with_channel(fun test_queue_redeclare/1, Connection),
+    ok = with_channel(fun test_bad_exchange/1, Connection).
+
+%% Declare an exchange with a non-existent type
+test_bad_exchange(Channel) ->
+    Result = amqp_channel:call(Channel,
+                               #'exchange.declare'{exchange = <<"test_y">>,
+                                                   type = <<"driect">>}),
+    ?assertMatch(Result, {error, #'connection.close'{}}).
 
 %% Redeclare an exchange with the wrong type
 test_exchange_redeclare(Channel) ->
@@ -216,8 +213,9 @@ test_exchange_redeclare(Channel) ->
           Channel, #'exchange.declare'{exchange= <<"test_x">>,
                                        type = <<"topic">>}),
     {error, #'channel.close'{}} =
-        amqp_channel:call(Channel, #'exchange.declare'{exchange= <<"test_x">>,
-                                                       type = <<"direct">>}),
+        amqp_channel:call(Channel,
+                          #'exchange.declare'{exchange = <<"test_x">>,
+                                              type = <<"direct">>}),
     ok.
 
 %% Redeclare a queue with the wrong type
