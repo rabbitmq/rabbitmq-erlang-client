@@ -130,7 +130,12 @@
 %% @spec (Channel, Method) -> Result
 %% @doc This is equivalent to amqp_channel:call(Channel, Method, none).
 call(Channel, Method) ->
-    gen_server:call(Channel, {call, Method, none}, infinity).
+    try
+        gen_server:call(Channel, {call, Method, none}, infinity)
+    catch
+        exit:{{shutdown, Reason}, _} -> % gen_server died during call
+            {error, Reason}
+    end.
 
 %% @spec (Channel, Method, Content) -> Result
 %% where
@@ -603,10 +608,11 @@ handle_method_from_server1(#'channel.close'{reply_code = Code,
     {noreply,
      State#state{
          closing = {just_channel, {server_initiated_close, Code, Text}}}};
-handle_method_from_server1(#'channel.close'{reply_code = Code,
-                                            reply_text = Text}, none, State) ->
+handle_method_from_server1(ChannelClose = #'channel.close'{reply_code = Code,
+                                                           reply_text = Text},
+                           none, State) ->
     do(#'channel.close_ok'{}, none, State),
-    handle_shutdown({server_initiated_close, Code, Text}, State);
+    handle_shutdown(ChannelClose, State);
 handle_method_from_server1(#'channel.close_ok'{}, none,
                            State = #state{closing = Closing}) ->
     case Closing of

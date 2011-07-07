@@ -49,11 +49,9 @@ bogus_rpc_test(Connection) ->
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
     %% Deliberately bind to a non-existent queue
     Bind = #'queue.bind'{exchange = X, queue = Q, routing_key = R},
-    try amqp_channel:call(Channel, Bind) of
-        _ -> exit(expected_to_exit)
-    catch
-        exit:{{shutdown, {server_initiated_close, Code, _}},_} ->
-            ?assertMatch(?NOT_FOUND, Code)
+    case amqp_channel:call(Channel, Bind) of
+        {error, #'channel.close'{}} -> ok;
+        _                           -> exit(expected_to_exit)
     end,
     test_util:wait_for_death(Channel),
     ?assertMatch(true, is_process_alive(Connection)),
@@ -65,7 +63,9 @@ hard_error_test(Connection) ->
     OtherChannelMonitor = erlang:monitor(process, OtherChannel),
     Qos = #'basic.qos'{global = true},
     try amqp_channel:call(Channel, Qos) of
-        _ -> exit(expected_to_exit)
+        E ->
+            io:format("got ~p~n", [E]),
+            exit(expected_to_exit)
     catch
         exit:{{shutdown, {connection_closing,
                           {server_initiated_close, ?NOT_IMPLEMENTED, _}}}, _} ->
