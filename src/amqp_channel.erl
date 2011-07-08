@@ -479,7 +479,7 @@ handle_close(Code, Text, From, State) ->
                              method_id  = 0},
     case check_block(Close, none, State) of
         ok         -> {noreply, rpc_top_half(Close, none, From, State)};
-        BlockReply -> {reply, BlockReply, State}
+        BlockReply -> {reply, {error, BlockReply}, State}
     end.
 
 handle_subscribe(#'basic.consume'{consumer_tag = Tag, nowait = NoWait} = Method,
@@ -613,7 +613,7 @@ handle_method_from_server1(#'channel.close_ok'{}, none,
         {just_channel, {app_initiated_close, _, _} = Reason} ->
             handle_shutdown(Reason, rpc_bottom_half(ok, State));
         {just_channel, #'channel.close'{} = Reason} ->
-            handle_shutdown(Reason, rpc_bottom_half(closing, State));
+            handle_shutdown(Reason, rpc_bottom_half({error, closing}, State));
         {connection, Reason} ->
             handle_shutdown({connection_closing, Reason}, State)
     end;

@@ -278,12 +278,12 @@ channel_multi_open_close_test(Connection) ->
             try amqp_connection:open_channel(Connection) of
                 {ok, Ch}           -> try amqp_channel:close(Ch) of
                                           ok                 -> ok;
-                                          closing            -> ok
+                                          {error, closing}   -> ok
                                       catch
                                           exit:{noproc, _} -> ok;
                                           exit:{normal, _} -> ok
                                       end;
-                closing            -> ok
+                {error, closing}   -> ok
             catch
                 exit:{noproc, _} -> ok;
                 exit:{normal, _} -> ok
@@ -395,9 +395,9 @@ simultaneous_close_test(Connection) ->
     %% Publish to non-existent exchange and immediately close channel
     amqp_channel:cast(Channel1, #'basic.publish'{exchange = uuid(),
                                                 routing_key = <<"a">>},
-                               #amqp_msg{payload = <<"foobar">>}),
+                      #amqp_msg{payload = <<"foobar">>}),
     try amqp_channel:close(Channel1) of
-        closing -> wait_for_death(Channel1)
+        {error, closing} -> wait_for_death(Channel1)
     catch
         exit:{noproc, _} ->
             ok;
@@ -413,7 +413,7 @@ simultaneous_close_test(Connection) ->
     #'exchange.declare_ok'{} =
         amqp_channel:call(Channel2, #'exchange.declare'{exchange = uuid()}),
 
-    teardown(Connection, Channel2).    
+    teardown(Connection, Channel2).
 
 basic_qos_test(Con) ->
     [NoQos, Qos] = [basic_qos_test(Con, Prefetch) || Prefetch <- [0,1]],
