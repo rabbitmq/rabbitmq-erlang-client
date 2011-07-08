@@ -293,6 +293,18 @@ channel_multi_open_close_test(Connection) ->
     amqp_connection:close(Connection),
     wait_for_death(Connection).
 
+connection_multi_close_test(NewConnectionFun) ->
+    Connection = NewConnectionFun(),
+    ConnectionCloseFun = fun(Connection) ->
+                                 case amqp_connection:close(Connection) of
+                                     ok               -> ok;
+                                     {error, closing} -> ok
+                                 end
+                         end,
+    spawn(fun() -> ConnectionCloseFun(Connection) end),
+    ConnectionCloseFun(Connection),
+    wait_for_death(Connection).
+
 basic_ack_test(Connection) ->
     {ok, Channel} = amqp_connection:open_channel(Connection),
     {ok, Q} = setup_publish(Channel),

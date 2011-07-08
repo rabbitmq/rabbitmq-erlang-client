@@ -19,7 +19,7 @@
 -define(RPC_TIMEOUT, 10000).
 -define(RPC_SLEEP, 500).
 
--export([test_coverage/0]).
+-export([test_coverage/0, new_connection/0]).
 
 -include("amqp_client.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -63,6 +63,9 @@ channel_repeat_open_close_test() ->
 
 channel_multi_open_close_test() ->
     test_util:channel_multi_open_close_test(new_connection()).
+
+connection_multi_close_test() ->
+    test_util:connection_multi_close_test(fun new_connection/0).
 
 basic_ack_test() ->
     test_util:basic_ack_test(new_connection()).

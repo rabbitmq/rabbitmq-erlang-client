@@ -179,7 +179,7 @@ handle_call(connect, _From,
     end;
 handle_call({command, Command}, From, State = #state{closing = Closing}) ->
     case Closing of false -> handle_command(Command, From, State);
-                    _     -> {reply, closing, State}
+                    _     -> {reply, {error, closing}, State}
     end;
 handle_call({info, Items}, _From, State) ->
     {reply, [{Item, i(Item, State)} || Item <- Items], State};

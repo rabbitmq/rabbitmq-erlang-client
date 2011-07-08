@@ -179,7 +179,7 @@ close(ConnectionPid) ->
 %%      Text = binary()
 %% @doc Closes the AMQP connection, allowing the caller to set the reply
 %% code and text.
-close(ConnectionPid, Code, Text) -> 
+close(ConnectionPid, Code, Text) ->
     Close = #'connection.close'{reply_text =  Text,
                                 reply_code = Code,
                                 class_id   = 0,

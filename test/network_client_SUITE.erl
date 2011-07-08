@@ -16,7 +16,7 @@
 
 -module(network_client_SUITE).
 
--export([test_coverage/0, new_connection/1]).
+-export([test_coverage/0, new_connection/0, new_connection/1]).
 
 -include("amqp_client.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -60,6 +60,9 @@ channel_repeat_open_close_test() ->
 
 channel_multi_open_close_test() ->
     test_util:channel_multi_open_close_test(new_connection()).
+
+connection_multi_close_test() ->
+    test_util:connection_multi_close_test(fun new_connection/0).
 
 basic_ack_test() ->
     test_util:basic_ack_test(new_connection()).
