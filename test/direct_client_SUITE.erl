@@ -67,6 +67,12 @@ channel_multi_open_close_test() ->
 connection_multi_close_test() ->
     test_util:connection_multi_close_test(fun new_connection/0).
 
+channel_close_normal_test() ->
+    test_util:channel_close_normal_test(new_connection()).
+
+connection_close_normal_test() ->
+    test_util:connection_close_normal_test(new_connection()).
+
 basic_ack_test() ->
     test_util:basic_ack_test(new_connection()).
 

@@ -305,6 +305,25 @@ connection_multi_close_test(NewConnectionFun) ->
     ConnectionCloseFun(Connection),
     wait_for_death(Connection).
 
+channel_close_normal_test(Connection) ->
+    {ok, Channel} = amqp_connection:open_channel(Connection),
+    monitor(process, Channel),
+    ok = amqp_channel:close(Channel),
+    receive
+        {'DOWN', _MRef, process, Channel, Reason} ->
+            ?assertMatch(normal, Reason)
+    end,
+    amqp_connection:close(Connection),
+    wait_for_death(Connection).
+
+connection_close_normal_test(Connection) ->
+    monitor(process, Connection),
+    ok = amqp_connection:close(Connection),
+    receive
+        {'DOWN', _MRef, process, Connection, Reason} ->
+            ?assertMatch(normal, Reason)
+    end.
+
 basic_ack_test(Connection) ->
     {ok, Channel} = amqp_connection:open_channel(Connection),
     {ok, Q} = setup_publish(Channel),

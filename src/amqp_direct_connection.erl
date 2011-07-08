@@ -62,7 +62,7 @@ closing(_ChannelCloseType, Reason, State) ->
 channels_terminated(State = #state{closing_reason = Reason,
                                    collector = Collector}) ->
     rabbit_queue_collector:delete_all(Collector),
-    {stop, {shutdown, Reason}, State}.
+    {stop, Reason, State}.
 
 terminate(_Reason, #state{node = Node}) ->
     rpc:call(Node, rabbit_direct, disconnect, [[{pid, self()}]]),
