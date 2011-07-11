@@ -65,8 +65,7 @@ hard_error_test(Connection) ->
     case amqp_channel:call(Channel, Qos) of
         %% Network case
         {error, #'connection.close'{reply_code = ?NOT_IMPLEMENTED}} -> ok;
-        E -> io:format("Instead, got: ~p~n", [E]),
-             exit(expected_to_exit)
+        E -> exit({expected_to_exit_but_got, E})
     end,
     receive
         {'DOWN', OtherChannelMonitor, process, OtherChannel, OtherExit} ->
@@ -190,8 +189,7 @@ connection_errors_test(Errors) ->
                 {error, auth_failure}],
     case Errors of
         Expected -> ok;
-        Got      -> io:format("was expecting ~p; got ~p~n", [Expected, Got]),
-                    fail
+        Got      -> exit({wrong_result, Got})
     end.
 
 channel_errors_test(Connection) ->

@@ -255,7 +255,7 @@ handle_method(#'connection.close_ok'{}, State = #state{closing = Closing}) ->
     case Closing of #closing{from = none} -> ok;
                     #closing{from = From} -> gen_server:reply(From, ok)
     end,
-    #closing{close = ClosingReason} = Closing,
+    ClosingReason = Closing#closing.close,
     {stop, normalize_closing_reason(ClosingReason), State};
 
 handle_method(Other, State) ->
@@ -303,7 +303,7 @@ set_closing_state(ChannelCloseType, NewClosing,
             true  -> NewClosing;
             false -> CurClosing
         end,
-    #closing{close = ClosingReason} = ResClosing,
+    ClosingReason = ResClosing#closing.close,
     amqp_channels_manager:signal_connection_closing(ChMgr, ChannelCloseType,
                                                     ClosingReason),
     callback(closing, [ChannelCloseType, ClosingReason],
