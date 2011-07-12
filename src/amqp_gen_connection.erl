@@ -317,6 +317,8 @@ closing_priority(#closing{reason = server_initiated_close}) -> 1.
 
 normalize_closing_reason(#'connection.close'{reply_code = 200}) ->
     normal;
+normalize_closing_reason({error, ClosingReason}) ->
+    {error, ClosingReason};
 normalize_closing_reason(ClosingReason) ->
     {error, ClosingReason}.
 
