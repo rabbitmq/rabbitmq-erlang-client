@@ -15,6 +15,7 @@
 %%
 
 %% @type close_reason(Type) = {shutdown, amqp_reason(Type)}.
+%% @type error_reason(Type) = {error, amqp_reason(Type)}.
 %% @type amqp_reason(Type) = {Type, Code, Text}
 %%      Code = non_neg_integer()
 %%      Text = binary().
@@ -42,11 +43,11 @@
 %%   </tr>
 %%   <tr>
 %%     <td>Server closes channel (soft error)</td>
-%%     <td>```close_reason(server_initiated_close)'''</td>
+%%     <td>```error_reason(server_initiated_close)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Server misbehaved (did not follow protocol)</td>
-%%     <td>```close_reason(server_misbehaved)'''</td>
+%%     <td>```error_reason(server_misbehaved)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Connection is closing (causing all channels to cleanup and
@@ -127,7 +128,7 @@
 %% AMQP Channel API methods
 %%---------------------------------------------------------------------------
 
-%% @spec (Channel, Method) -> Result
+%% @spec (Channel, Method) -> Result | {error, Reason}
 %% @doc This is equivalent to amqp_channel:call(Channel, Method, none).
 call(Channel, Method) ->
     try
@@ -137,7 +138,7 @@ call(Channel, Method) ->
             Error
     end.
 
-%% @spec (Channel, Method, Content) -> Result
+%% @spec (Channel, Method, Content) -> Result | {error, Reason}
 %% where
 %%      Channel = pid()
 %%      Method = amqp_method()
@@ -177,7 +178,7 @@ cast(Channel, Method) ->
 cast(Channel, Method, Content) ->
     gen_server:cast(Channel, {cast, Method, Content}).
 
-%% @spec (Channel) -> ok | closing
+%% @spec (Channel) -> ok | {error, closing}
 %% where
 %%      Channel = pid()
 %% @doc Closes the channel, invokes
@@ -185,7 +186,7 @@ cast(Channel, Method, Content) ->
 close(Channel) ->
     close(Channel, 200, <<"Goodbye">>).
 
-%% @spec (Channel, Code, Text) -> ok | closing
+%% @spec (Channel, Code, Text) -> ok | {error, closing}
 %% where
 %%      Channel = pid()
 %%      Code = integer()
