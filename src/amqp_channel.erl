@@ -133,8 +133,8 @@ call(Channel, Method) ->
     try
         gen_server:call(Channel, {call, Method, none}, infinity)
     catch
-        exit:{{shutdown, Reason}, _} -> % gen_server died during call
-            {error, Reason}
+        exit:{{error, Reason} = Error, _} -> % gen_server died during call
+            Error
     end.
 
 %% @spec (Channel, Method, Content) -> Result
@@ -746,9 +746,9 @@ handle_shutdown({connection_closing, #'connection.close'{reply_code = 200}},
                 State) ->
     {stop, normal, State};
 handle_shutdown({connection_closing, ConnectionClose}, State) ->
-    {stop, {shutdown, ConnectionClose}, State};
+    {stop, {error, ConnectionClose}, State};
 handle_shutdown(Reason, State) ->
-    {stop, {shutdown, Reason}, State}.
+    {stop, {error, Reason}, State}.
 
 %%---------------------------------------------------------------------------
 %% Internal plumbing

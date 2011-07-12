@@ -148,8 +148,8 @@ handle_down(Pid, Reason, State) ->
     end.
 
 handle_channel_down(Pid, Number, Reason, State) ->
-    maybe_report_down(Pid, case Reason of {shutdown, R} -> R;
-                                          _             -> Reason
+    maybe_report_down(Pid, case Reason of {error, R} -> R;
+                                          _          -> Reason
                            end,
                       State),
     NewState = internal_unregister(Number, Pid, State),

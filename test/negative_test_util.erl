@@ -69,7 +69,7 @@ hard_error_test(Connection) ->
     end,
     receive
         {'DOWN', OtherChannelMonitor, process, OtherChannel, OtherExit} ->
-            ?assertMatch({shutdown,
+            ?assertMatch({error,
                           #'connection.close'{reply_code = ?NOT_IMPLEMENTED}},
                          OtherExit)
     end,
@@ -156,7 +156,7 @@ command_invalid_over_channel0_test(Connection) ->
 assert_down_with_error(MonitorRef, CodeAtom) ->
     receive
         {'DOWN', MonitorRef, process, _, Reason} ->
-            {shutdown, #'connection.close'{reply_code = Code}} = Reason,
+            {error, #'connection.close'{reply_code = Code}} = Reason,
             ?assertMatch(CodeAtom, ?PROTOCOL:amqp_exception(Code))
     after 2000 ->
         exit(did_not_die)

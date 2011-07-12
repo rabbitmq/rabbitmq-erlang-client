@@ -318,7 +318,7 @@ closing_priority(#closing{reason = server_initiated_close}) -> 1.
 normalize_closing_reason(#'connection.close'{reply_code = 200}) ->
     normal;
 normalize_closing_reason(ClosingReason) ->
-    {shutdown, ClosingReason}.
+    {error, ClosingReason}.
 
 handle_channels_terminated(State = #state{closing = Closing,
                                           module = Mod,
