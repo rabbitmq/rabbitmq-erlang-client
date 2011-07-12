@@ -14,7 +14,6 @@
 %% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
 %%
 
-%% @type close_reason(Type) = {shutdown, amqp_reason(Type)}.
 %% @type error_reason(Type) = {error, amqp_reason(Type)}.
 %% @type amqp_reason(Type) = {Type, Code, Text}
 %%      Code = non_neg_integer()
@@ -36,10 +35,6 @@
 %%   <tr>
 %%     <td>Any reason, where Code would have been 200 otherwise</td>
 %%     <td>```normal'''</td>
-%%   </tr>
-%%   <tr>
-%%     <td>User application calls amqp_channel:close/3</td>
-%%     <td>```close_reason(app_initiated_close)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Server closes channel (soft error)</td>
