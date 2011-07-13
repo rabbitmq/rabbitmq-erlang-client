@@ -123,22 +123,18 @@
 %% AMQP Channel API methods
 %%---------------------------------------------------------------------------
 
-%% @spec (Channel, Method) -> Result | {error, Reason}
+%% @spec (Channel, Method) -> {ok, amqp_result()} | {error, Reason}
 %% @doc This is equivalent to amqp_channel:call(Channel, Method, none).
 call(Channel, Method) ->
-    try
-        gen_server:call(Channel, {call, Method, none}, infinity)
-    catch
-        exit:{{error, Reason} = Error, _} -> % gen_server died during call
-            Error
-    end.
+    call(Channel, Method, none).
 
-%% @spec (Channel, Method, Content) -> Result | {error, Reason}
+%% @spec (Channel, Method, Content) ->
+%%           ok | {ok, amqp_method()} | {error, Reason}
 %% where
 %%      Channel = pid()
 %%      Method = amqp_method()
 %%      Content = amqp_msg() | none
-%%      Result = amqp_method() | ok | blocked | closing
+%%      Reason =  blocked | closing
 %% @doc This sends an AMQP method on the channel.
 %% For content bearing methods, Content has to be an amqp_msg(), whereas
 %% for non-content bearing methods, it needs to be the atom 'none'.<br/>
@@ -154,7 +150,13 @@ call(Channel, Method) ->
 %% the broker. It does not necessarily imply that the broker has
 %% accepted responsibility for the message.
 call(Channel, Method, Content) ->
-    gen_server:call(Channel, {call, Method, Content}, infinity).
+    try gen_server:call(Channel, {call, Method, Content}, infinity) of
+        ok      -> ok;
+        Result -> {ok, Result}
+    catch
+        exit:{{error, Reason} = Error, _} -> % gen_server died during call
+            Error
+    end.
 
 %% @spec (Channel, Method) -> ok
 %% @doc This is equivalent to amqp_channel:cast(Channel, Method, none).
@@ -216,7 +218,10 @@ next_publish_seqno(Channel) ->
 %% receive the acknowledgement as the return value of this function, whereas
 %% the consumer process will receive the notification asynchronously.
 subscribe(Channel, BasicConsume = #'basic.consume'{}, Consumer) ->
-    gen_server:call(Channel, {subscribe, BasicConsume, Consumer}, infinity).
+    case gen_server:call(Channel, {subscribe, BasicConsume, Consumer}, infinity) of
+        ok -> ok;
+        Result -> {ok, Result}
+    end.
 
 %% @spec (Channel, ReturnHandler) -> ok
 %% where

@@ -36,7 +36,7 @@ non_existent_exchange_test(Connection) ->
 
     %% Make sure Connection and OtherChannel still serve us and are not dead
     {ok, _} = amqp_connection:open_channel(Connection),
-    #'exchange.declare_ok'{} =
+    {ok, #'exchange.declare_ok'{}} =
         amqp_channel:call(OtherChannel,
                           #'exchange.declare'{exchange = test_util:uuid()}),
     amqp_connection:close(Connection).
@@ -208,7 +208,7 @@ test_bad_exchange(Channel) ->
 
 %% Redeclare an exchange with the wrong type
 test_exchange_redeclare(Channel) ->
-    #'exchange.declare_ok'{} =
+    {ok, #'exchange.declare_ok'{}} =
         amqp_channel:call(
           Channel, #'exchange.declare'{exchange= <<"bar">>,
                                        type = <<"topic">>}),
@@ -220,7 +220,7 @@ test_exchange_redeclare(Channel) ->
 
 %% Redeclare a queue with the wrong type
 test_queue_redeclare(Channel) ->
-    #'queue.declare_ok'{} =
+    {ok, #'queue.declare_ok'{}} =
         amqp_channel:call(
           Channel, #'queue.declare'{queue = <<"foo">>}),
     ?assertMatch({error, #'channel.close'{}},
