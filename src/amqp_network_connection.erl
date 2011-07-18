@@ -63,7 +63,7 @@ handle_message(socket_closing_timeout,
     {stop, {socket_closing_timeout, Reason}, State};
 handle_message(socket_closed, State = #state{waiting_socket_close = true,
                                              closing_reason = Reason}) ->
-    {stop, {shutdown, Reason}, State};
+    {stop, Reason, State};
 handle_message(socket_closed, State = #state{waiting_socket_close = false}) ->
     {stop, socket_closed_unexpectedly, State};
 handle_message({socket_error, _} = SocketError, State) ->
@@ -76,8 +76,7 @@ handle_message(heartbeat_timeout, State) ->
 closing(_ChannelCloseType, Reason, State) ->
     {ok, State#state{closing_reason = Reason}}.
 
-channels_terminated(State = #state{closing_reason =
-                                     {server_initiated_close, _, _}}) ->
+channels_terminated(State = #state{closing_reason = #'connection.close'{}}) ->
     {ok, State#state{waiting_socket_close = true}};
 channels_terminated(State) ->
     {ok, State}.

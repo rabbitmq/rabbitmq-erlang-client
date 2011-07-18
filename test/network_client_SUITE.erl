@@ -16,7 +16,7 @@
 
 -module(network_client_SUITE).
 
--export([test_coverage/0, new_connection/1]).
+-export([test_coverage/0, new_connection/0, new_connection/1]).
 
 -include("amqp_client.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -60,6 +60,15 @@ channel_repeat_open_close_test() ->
 
 channel_multi_open_close_test() ->
     test_util:channel_multi_open_close_test(new_connection()).
+
+connection_multi_close_test() ->
+    test_util:connection_multi_close_test(fun new_connection/0).
+
+channel_close_normal_test() ->
+    test_util:channel_close_normal_test(new_connection()).
+
+connection_close_normal_test() ->
+    test_util:connection_close_normal_test(new_connection()).
 
 basic_ack_test() ->
     test_util:basic_ack_test(new_connection()).
@@ -163,6 +172,23 @@ command_invalid_over_channel_test() ->
 
 command_invalid_over_channel0_test() ->
     negative_test_util:command_invalid_over_channel0_test(new_connection()).
+
+connection_errors_test() ->
+    {timeout, 60,
+     fun() ->
+             negative_test_util:connection_errors_test(
+               [amqp_connection:start(#amqp_params_network
+                                      {virtual_host = <<"/non-existing">>}),
+                amqp_connection:start(#amqp_params_network
+                                      {virtual_host = <<"/no-access">>}),
+                amqp_connection:start(
+                  #amqp_params_network{password = <<"meh">>})]),
+             {error, econnrefused} =
+                 amqp_connection:start(#amqp_params_network{port = 10000})
+     end}.
+
+channel_errors_test() ->
+    negative_test_util:channel_errors_test(new_connection()).
 
 %%---------------------------------------------------------------------------
 %% Common Functions

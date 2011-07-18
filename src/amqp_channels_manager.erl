@@ -148,8 +148,8 @@ handle_down(Pid, Reason, State) ->
     end.
 
 handle_channel_down(Pid, Number, Reason, State) ->
-    maybe_report_down(Pid, case Reason of {shutdown, R} -> R;
-                                          _             -> Reason
+    maybe_report_down(Pid, case Reason of {error, R} -> R;
+                                          _          -> Reason
                            end,
                       State),
     NewState = internal_unregister(Number, Pid, State),
@@ -160,7 +160,9 @@ maybe_report_down(_Pid, normal, _State) ->
     ok;
 maybe_report_down(_Pid, {app_initiated_close, _, _}, _State) ->
     ok;
-maybe_report_down(_Pid, {server_initiated_close, _, _}, _State) ->
+maybe_report_down(_Pid, #'connection.close'{}, _State) ->
+    ok;
+maybe_report_down(_Pid, #'channel.close'{}, _State) ->
     ok;
 maybe_report_down(_Pid, {connection_closing, _}, _State) ->
     ok;

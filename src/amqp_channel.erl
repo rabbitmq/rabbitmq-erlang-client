@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
 %%
 
-%% @type close_reason(Type) = {shutdown, amqp_reason(Type)}.
+%% @type error_reason(Type) = {error, amqp_reason(Type)}.
 %% @type amqp_reason(Type) = {Type, Code, Text}
 %%      Code = non_neg_integer()
 %%      Text = binary().
@@ -37,16 +37,12 @@
 %%     <td>```normal'''</td>
 %%   </tr>
 %%   <tr>
-%%     <td>User application calls amqp_channel:close/3</td>
-%%     <td>```close_reason(app_initiated_close)'''</td>
-%%   </tr>
-%%   <tr>
 %%     <td>Server closes channel (soft error)</td>
-%%     <td>```close_reason(server_initiated_close)'''</td>
+%%     <td>```error_reason(server_initiated_close)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Server misbehaved (did not follow protocol)</td>
-%%     <td>```close_reason(server_misbehaved)'''</td>
+%%     <td>```error_reason(server_misbehaved)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Connection is closing (causing all channels to cleanup and
@@ -131,17 +127,18 @@
 %% AMQP Channel API methods
 %%---------------------------------------------------------------------------
 
-%% @spec (Channel, Method) -> Result
+%% @spec (Channel, Method) -> {ok, amqp_result()} | {error, Reason}
 %% @doc This is equivalent to amqp_channel:call(Channel, Method, none).
 call(Channel, Method) ->
-    gen_server:call(Channel, {call, Method, none}, infinity).
+    call(Channel, Method, none).
 
-%% @spec (Channel, Method, Content) -> Result
+%% @spec (Channel, Method, Content) ->
+%%           ok | {ok, amqp_method()} | {error, Reason}
 %% where
 %%      Channel = pid()
 %%      Method = amqp_method()
 %%      Content = amqp_msg() | none
-%%      Result = amqp_method() | ok | blocked | closing
+%%      Reason =  blocked | closing
 %% @doc This sends an AMQP method on the channel.
 %% For content bearing methods, Content has to be an amqp_msg(), whereas
 %% for non-content bearing methods, it needs to be the atom 'none'.<br/>
@@ -157,7 +154,13 @@ call(Channel, Method) ->
 %% the broker. It does not necessarily imply that the broker has
 %% accepted responsibility for the message.
 call(Channel, Method, Content) ->
-    gen_server:call(Channel, {call, Method, Content}, infinity).
+    try gen_server:call(Channel, {call, Method, Content}, infinity) of
+        ok      -> ok;
+        Result -> {ok, Result}
+    catch
+        exit:{{error, _} = Error, _} -> % gen_server died during call
+            Error
+    end.
 
 %% @spec (Channel, Method) -> ok
 %% @doc This is equivalent to amqp_channel:cast(Channel, Method, none).
@@ -176,7 +179,7 @@ cast(Channel, Method) ->
 cast(Channel, Method, Content) ->
     gen_server:cast(Channel, {cast, Method, Content}).
 
-%% @spec (Channel) -> ok | closing
+%% @spec (Channel) -> ok | {error, closing}
 %% where
 %%      Channel = pid()
 %% @doc Closes the channel, invokes
@@ -184,7 +187,7 @@ cast(Channel, Method, Content) ->
 close(Channel) ->
     close(Channel, 200, <<"Goodbye">>).
 
-%% @spec (Channel, Code, Text) -> ok | closing
+%% @spec (Channel, Code, Text) -> ok | {error, closing}
 %% where
 %%      Channel = pid()
 %%      Code = integer()
@@ -237,7 +240,10 @@ wait_for_confirms_or_die(Channel) ->
 %% receive the acknowledgement as the return value of this function, whereas
 %% the consumer process will receive the notification asynchronously.
 subscribe(Channel, BasicConsume = #'basic.consume'{}, Consumer) ->
-    gen_server:call(Channel, {subscribe, BasicConsume, Consumer}, infinity).
+    case gen_server:call(Channel, {subscribe, BasicConsume, Consumer}, infinity) of
+        ok -> ok;
+        Result -> {ok, Result}
+    end.
 
 %% @spec (Channel, ReturnHandler) -> ok
 %% where
@@ -507,7 +513,7 @@ handle_close(Code, Text, From, State) ->
                              method_id  = 0},
     case check_block(Close, none, State) of
         ok         -> {noreply, rpc_top_half(Close, none, From, State)};
-        BlockReply -> {reply, BlockReply, State}
+        BlockReply -> {reply, {error, BlockReply}, State}
     end.
 
 handle_subscribe(#'basic.consume'{consumer_tag = Tag, nowait = NoWait} = Method,
@@ -625,29 +631,23 @@ handle_method_from_server(Method, Content, State = #state{closing = Closing}) ->
 
 handle_method_from_server1(#'channel.open_ok'{}, none, State) ->
     {noreply, rpc_bottom_half(ok, State)};
-handle_method_from_server1(#'channel.close'{reply_code = Code,
-                                            reply_text = Text},
-                           none,
+handle_method_from_server1(ChannelClose = #'channel.close'{}, none,
                            State = #state{closing = {just_channel, _}}) ->
     %% Both client and server sent close at the same time. Don't shutdown yet,
     %% wait for close_ok.
     do(#'channel.close_ok'{}, none, State),
     erlang:send_after(?TIMEOUT_CLOSE_OK, self(), timed_out_waiting_close_ok),
-    {noreply,
-     State#state{
-         closing = {just_channel, {server_initiated_close, Code, Text}}}};
-handle_method_from_server1(#'channel.close'{reply_code = Code,
-                                            reply_text = Text}, none, State) ->
+    {noreply, State#state{closing = {just_channel, ChannelClose}}};
+handle_method_from_server1(ChannelClose = #'channel.close'{}, none, State) ->
     do(#'channel.close_ok'{}, none, State),
-    handle_shutdown({server_initiated_close, Code, Text}, State);
+    handle_shutdown(ChannelClose, State);
 handle_method_from_server1(#'channel.close_ok'{}, none,
                            State = #state{closing = Closing}) ->
     case Closing of
         {just_channel, {app_initiated_close, _, _} = Reason} ->
             handle_shutdown(Reason, rpc_bottom_half(ok, State));
-        {just_channel, {server_initiated_close, _, _} = Reason} ->
-            handle_shutdown(Reason,
-                            rpc_bottom_half(closing, State));
+        {just_channel, #'channel.close'{} = Reason} ->
+            handle_shutdown(Reason, rpc_bottom_half({error, closing}, State));
         {connection, Reason} ->
             handle_shutdown({connection_closing, Reason}, State)
     end;
@@ -753,12 +753,15 @@ handle_connection_closing(CloseType, Reason,
 
 handle_channel_exit(Reason, State = #state{connection = Connection}) ->
     case Reason of
-        %% Sent by rabbit_channel in the direct case
+        %% Sent by rabbit_channel in the direct case when the server
+        %% sends a frame that annoys rabbit_command_assembler in some
+        %% way.
         #amqp_error{name = ErrorName, explanation = Expl} ->
             ?LOG_WARN("Channel (~p) closing: server sent error ~p~n",
                       [self(), Reason]),
             {IsHard, Code, _} = ?PROTOCOL:lookup_amqp_exception(ErrorName),
-            ReportedReason = {server_initiated_close, Code, Expl},
+            ReportedReason = #'connection.close'{reply_code = Code,
+                                                 reply_text = Expl},
             handle_shutdown(
                 if IsHard ->
                              amqp_gen_connection:hard_error_in_channel(
@@ -771,14 +774,15 @@ handle_channel_exit(Reason, State = #state{connection = Connection}) ->
             {stop, {infrastructure_died, Reason}, State}
     end.
 
-handle_shutdown({_, 200, _}, State) ->
+handle_shutdown({app_initiated_close, 200, _}, State) ->
     {stop, normal, State};
-handle_shutdown({connection_closing, {_, 200, _}}, State) ->
+handle_shutdown({connection_closing, #'connection.close'{reply_code = 200}},
+                State) ->
     {stop, normal, State};
-handle_shutdown({connection_closing, normal}, State) ->
-    {stop, normal, State};
+handle_shutdown({connection_closing, ConnectionClose}, State) ->
+    {stop, {error, ConnectionClose}, State};
 handle_shutdown(Reason, State) ->
-    {stop, {shutdown, Reason}, State}.
+    {stop, {error, Reason}, State}.
 
 %%---------------------------------------------------------------------------
 %% Internal plumbing

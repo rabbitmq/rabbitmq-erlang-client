@@ -14,7 +14,7 @@
 %% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
 %%
 
-%% @type close_reason(Type) = {shutdown, amqp_reason(Type)}.
+%% @type error_reason(Type) = {error, amqp_reason(Type)}.
 %% @type amqp_reason(Type) = {Type, Code, Text}
 %%      Code = non_neg_integer()
 %%      Text = binary().
@@ -41,22 +41,18 @@
 %%     <td>```normal'''</td>
 %%   </tr>
 %%   <tr>
-%%     <td>User application calls amqp_connection:close/3</td>
-%%     <td>```close_reason(app_initiated_close)'''</td>
-%%   </tr>
-%%   <tr>
 %%     <td>Server closes connection (hard error)</td>
-%%     <td>```close_reason(server_initiated_close)'''</td>
+%%     <td>```error_reason(server_initiated_close)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Server misbehaved (did not follow protocol)</td>
-%%     <td>```close_reason(server_misbehaved)'''</td>
+%%     <td>```error_reason(server_misbehaved)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>AMQP client internal error - usually caused by a channel exiting
 %%         with an unusual reason. This is usually accompanied by a more
 %%         detailed error log from the channel</td>
-%%     <td>```close_reason(internal_error)'''</td>
+%%     <td>```error_reason(internal_error)'''</td>
 %%   </tr>
 %%   <tr>
 %%     <td>Other error</td>
@@ -183,14 +179,14 @@ open_channel(ConnectionPid, ChannelNumber) ->
 close(ConnectionPid) ->
     close(ConnectionPid, 200, <<"Goodbye">>).
 
-%% @spec (ConnectionPid, Code, Text) -> ok | closing
+%% @spec (ConnectionPid, Code, Text) -> ok | {error, closing}
 %% where
 %%      ConnectionPid = pid()
 %%      Code = integer()
 %%      Text = binary()
 %% @doc Closes the AMQP connection, allowing the caller to set the reply
 %% code and text.
-close(ConnectionPid, Code, Text) -> 
+close(ConnectionPid, Code, Text) ->
     Close = #'connection.close'{reply_text =  Text,
                                 reply_code = Code,
                                 class_id   = 0,

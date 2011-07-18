@@ -143,8 +143,9 @@ callback(Function, Params, State = #state{module = Mod,
     case erlang:apply(Mod, Function, Params ++ [MState]) of
         {ok, NewMState}           -> {noreply,
                                       State#state{module_state = NewMState}};
-        {stop, Reason, NewMState} -> {stop, Reason,
-                                      State#state{module_state = NewMState}}
+        {stop, Reason, NewMState} ->
+            {stop, normalize_closing_reason(Reason),
+             State#state{module_state = NewMState}}
     end.
 
 %%---------------------------------------------------------------------------
@@ -175,11 +176,11 @@ handle_call(connect, _From,
             server_misbehaved(self(), AmqpError),
             {reply, Error, after_connect(Params, State1)};
         {error, _} = Error ->
-            {stop, {shutdown, Error}, Error, State0}
+            {stop, normalize_closing_reason(Error), Error, State0}
     end;
 handle_call({command, Command}, From, State = #state{closing = Closing}) ->
     case Closing of false -> handle_command(Command, From, State);
-                    _     -> {reply, closing, State}
+                    _     -> {reply, {error, closing}, State}
     end;
 handle_call({info, Items}, _From, State) ->
     {reply, [{Item, i(Item, State)} || Item <- Items], State};
@@ -241,7 +242,7 @@ handle_command({open_channel, ProposedNumber}, _From,
     {reply, amqp_channels_manager:open_channel(ChMgr, ProposedNumber,
                                                Mod:open_channel_args(MState)),
      State};
- handle_command({close, #'connection.close'{} = Close}, From, State) ->
+handle_command({close, #'connection.close'{} = Close}, From, State) ->
      app_initiated_close(Close, From, State).
 
 %%---------------------------------------------------------------------------
@@ -254,7 +255,9 @@ handle_method(#'connection.close_ok'{}, State = #state{closing = Closing}) ->
     case Closing of #closing{from = none} -> ok;
                     #closing{from = From} -> gen_server:reply(From, ok)
     end,
-    {stop, {shutdown, closing_to_reason(Closing)}, State};
+    ClosingReason = Closing#closing.close,
+    {stop, normalize_closing_reason(ClosingReason), State};
+
 handle_method(Other, State) ->
     server_misbehaved_close(#amqp_error{name        = command_invalid,
                                         explanation = "unexpected method on "
@@ -300,7 +303,7 @@ set_closing_state(ChannelCloseType, NewClosing,
             true  -> NewClosing;
             false -> CurClosing
         end,
-    ClosingReason = closing_to_reason(ResClosing),
+    ClosingReason = ResClosing#closing.close,
     amqp_channels_manager:signal_connection_closing(ChMgr, ChannelCloseType,
                                                     ClosingReason),
     callback(closing, [ChannelCloseType, ClosingReason],
@@ -312,15 +315,12 @@ closing_priority(#closing{reason = internal_error})         -> 3;
 closing_priority(#closing{reason = server_misbehaved})      -> 2;
 closing_priority(#closing{reason = server_initiated_close}) -> 1.
 
-closing_to_reason(#closing{close = #'connection.close'{reply_code = 200}}) ->
+normalize_closing_reason(#'connection.close'{reply_code = 200}) ->
     normal;
-closing_to_reason(#closing{reason = Reason,
-                           close = #'connection.close'{reply_code = Code,
-                                                       reply_text = Text}}) ->
-    {Reason, Code, Text};
-closing_to_reason(#closing{reason = Reason,
-                           close = {Reason, _Code, _Text} = Close}) ->
-    Close.
+normalize_closing_reason({error, ClosingReason}) ->
+    {error, ClosingReason};
+normalize_closing_reason(ClosingReason) ->
+    {error, ClosingReason}.
 
 handle_channels_terminated(State = #state{closing = Closing,
                                           module = Mod,
@@ -335,9 +335,11 @@ handle_channels_terminated(State = #state{closing = Closing,
                               {'$gen_cast', timeout_waiting_for_close_ok})
     end,
     case callback(channels_terminated, [], State) of
-        {stop, _, _} = Stop -> case From of none -> ok;
-                                            _    -> gen_server:reply(From, ok)
-                               end,
-                               Stop;
-        Other               -> Other
+        {stop, _, _} = Stop ->
+            case From of
+                none -> ok;
+                _    -> gen_server:reply(From, ok)
+            end,
+            Stop;
+        Other -> Other
     end.

@@ -19,7 +19,7 @@
 -define(RPC_TIMEOUT, 10000).
 -define(RPC_SLEEP, 500).
 
--export([test_coverage/0]).
+-export([test_coverage/0, new_connection/0]).
 
 -include("amqp_client.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -63,6 +63,15 @@ channel_repeat_open_close_test() ->
 
 channel_multi_open_close_test() ->
     test_util:channel_multi_open_close_test(new_connection()).
+
+connection_multi_close_test() ->
+    test_util:connection_multi_close_test(fun new_connection/0).
+
+channel_close_normal_test() ->
+    test_util:channel_close_normal_test(new_connection()).
+
+connection_close_normal_test() ->
+    test_util:connection_close_normal_test(new_connection()).
 
 basic_ack_test() ->
     test_util:basic_ack_test(new_connection()).
@@ -133,6 +142,18 @@ no_permission_test() ->
 
 command_invalid_over_channel_test() ->
     negative_test_util:command_invalid_over_channel_test(new_connection()).
+
+connection_errors_test() ->
+    negative_test_util:connection_errors_test(
+      [new_connection(#amqp_params_direct{
+                         virtual_host = <<"/non-existing">>}),
+       new_connection(#amqp_params_direct{
+                         virtual_host = <<"/no-access">>}),
+       new_connection(#amqp_params_direct{username = <<"meh">>})]),
+    {error, {badrpc, _}} = amqp_connection:start(#amqp_params_direct{}).
+
+channel_errors_test() ->
+    negative_test_util:channel_errors_test(new_connection()).
 
 %%---------------------------------------------------------------------------
 %% Common Functions

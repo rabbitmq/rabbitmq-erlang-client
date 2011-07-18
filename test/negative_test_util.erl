@@ -23,12 +23,12 @@
 
 non_existent_exchange_test(Connection) ->
     X = test_util:uuid(),
-    RoutingKey = <<"a">>, 
+    RoutingKey = <<"a">>,
     Payload = <<"foobar">>,
     {ok, Channel} = amqp_connection:open_channel(Connection),
     {ok, OtherChannel} = amqp_connection:open_channel(Connection),
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
-    
+
     %% Deliberately mix up the routingkey and exchange arguments
     Publish = #'basic.publish'{exchange = RoutingKey, routing_key = X},
     amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
@@ -36,7 +36,7 @@ non_existent_exchange_test(Connection) ->
 
     %% Make sure Connection and OtherChannel still serve us and are not dead
     {ok, _} = amqp_connection:open_channel(Connection),
-    #'exchange.declare_ok'{} =
+    {ok, #'exchange.declare_ok'{}} =
         amqp_channel:call(OtherChannel,
                           #'exchange.declare'{exchange = test_util:uuid()}),
     amqp_connection:close(Connection).
@@ -49,11 +49,9 @@ bogus_rpc_test(Connection) ->
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
     %% Deliberately bind to a non-existent queue
     Bind = #'queue.bind'{exchange = X, queue = Q, routing_key = R},
-    try amqp_channel:call(Channel, Bind) of
-        _ -> exit(expected_to_exit)
-    catch
-        exit:{{shutdown, {server_initiated_close, Code, _}},_} ->
-            ?assertMatch(?NOT_FOUND, Code)
+    case amqp_channel:call(Channel, Bind) of
+        {error, #'channel.close'{}} -> ok;
+        _                           -> exit(expected_to_exit)
     end,
     test_util:wait_for_death(Channel),
     ?assertMatch(true, is_process_alive(Connection)),
@@ -64,18 +62,15 @@ hard_error_test(Connection) ->
     {ok, OtherChannel} = amqp_connection:open_channel(Connection),
     OtherChannelMonitor = erlang:monitor(process, OtherChannel),
     Qos = #'basic.qos'{global = true},
-    try amqp_channel:call(Channel, Qos) of
-        _ -> exit(expected_to_exit)
-    catch
-        exit:{{shutdown, {connection_closing,
-                          {server_initiated_close, ?NOT_IMPLEMENTED, _}}}, _} ->
-            ok
+    case amqp_channel:call(Channel, Qos) of
+        %% Network case
+        {error, #'connection.close'{reply_code = ?NOT_IMPLEMENTED}} -> ok;
+        E -> exit({expected_to_exit_but_got, E})
     end,
     receive
         {'DOWN', OtherChannelMonitor, process, OtherChannel, OtherExit} ->
-            ?assertMatch({shutdown,
-                          {connection_closing,
-                           {server_initiated_close, ?NOT_IMPLEMENTED, _}}},
+            ?assertMatch({error,
+                          #'connection.close'{reply_code = ?NOT_IMPLEMENTED}},
                          OtherExit)
     end,
     test_util:wait_for_death(Channel),
@@ -161,7 +156,7 @@ command_invalid_over_channel0_test(Connection) ->
 assert_down_with_error(MonitorRef, CodeAtom) ->
     receive
         {'DOWN', MonitorRef, process, _, Reason} ->
-            {shutdown, {server_misbehaved, Code, _}} = Reason,
+            {error, #'connection.close'{reply_code = Code}} = Reason,
             ?assertMatch(CodeAtom, ?PROTOCOL:amqp_exception(Code))
     after 2000 ->
         exit(did_not_die)
@@ -187,3 +182,53 @@ no_permission_test(StartConnectionFun) ->
                  StartConnectionFun(<<"test_user_no_perm">>,
                                     <<"test_user_no_perm">>,
                                     <<"/">>)).
+
+connection_errors_test(Errors) ->
+    Expected = [{error, access_refused},
+                {error, access_refused},
+                {error, auth_failure}],
+    case Errors of
+        Expected -> ok;
+        Got      -> exit({wrong_result, Got})
+    end.
+
+channel_errors_test(Connection) ->
+    ok = with_channel(fun test_exchange_redeclare/1, Connection),
+    ok = with_channel(fun test_queue_redeclare/1, Connection),
+    ok = with_channel(fun test_bad_exchange/1, Connection),
+    test_util:wait_for_death(Connection).
+
+%% Declare an exchange with a non-existent type.  Hard-error.
+test_bad_exchange(Channel) ->
+    ?assertMatch({error, #'connection.close'{}},
+                 amqp_channel:call(Channel,
+                                   #'exchange.declare'{exchange = <<"foo">>,
+                                                       type = <<"driect">>})),
+    test_util:wait_for_death(Channel).
+
+%% Redeclare an exchange with the wrong type
+test_exchange_redeclare(Channel) ->
+    {ok, #'exchange.declare_ok'{}} =
+        amqp_channel:call(
+          Channel, #'exchange.declare'{exchange= <<"bar">>,
+                                       type = <<"topic">>}),
+    ?assertMatch({error, #'channel.close'{}},
+                 amqp_channel:call(Channel,
+                                   #'exchange.declare'{exchange = <<"bar">>,
+                                                       type = <<"direct">>})),
+    test_util:wait_for_death(Channel).
+
+%% Redeclare a queue with the wrong type
+test_queue_redeclare(Channel) ->
+    {ok, #'queue.declare_ok'{}} =
+        amqp_channel:call(
+          Channel, #'queue.declare'{queue = <<"foo">>}),
+    ?assertMatch({error, #'channel.close'{}},
+                 amqp_channel:call(
+                   Channel, #'queue.declare'{queue = <<"foo">>,
+                                             durable = true})),
+    test_util:wait_for_death(Channel).
+
+with_channel(Fun, Connection) ->
+    {ok, Channel} = amqp_connection:open_channel(Connection),
+    Fun(Channel).
