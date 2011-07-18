@@ -875,7 +875,7 @@ server_misbehaved(#amqp_error{} = AmqpError, State = #state{number = Number}) ->
     end.
 
 handle_nack(State = #state{waiting_set = WSet}) ->
-    DyingPids = [{From, Pid} || {From, Pid} <- gb_trees:to_list(WSet),
+    DyingPids = [{From, Pid} || {From, {Pid, _}} <- gb_trees:to_list(WSet),
                                 Pid =/= none],
     case DyingPids of
         [] -> State;
@@ -893,23 +893,34 @@ update_confirm_set(#'basic.nack'{delivery_tag = SeqNo},
       State#state{unconfirmed_set = gb_sets:del_element(SeqNo, USet),
                   only_acks_received = false}).
 
-maybe_notify_waiters(State = #state{unconfirmed_set = USet}) ->
-    case gb_sets:is_empty(USet) of
-        false -> State;
-        true  -> notify_confirm_waiters(State)
-    end.
-
-notify_confirm_waiters(State = #state{waiting_set = WSet,
-                                      only_acks_received = OAR}) ->
-    [gen_server:reply(From, OAR) || {From, _} <- gb_trees:to_list(WSet)],
-    State#state{waiting_set = gb_trees:empty(),
-                only_acks_received = true}.
+maybe_notify_waiters(State = #state{unconfirmed_set    = USet,
+                                    waiting_set        = WSet,
+                                    only_acks_received = OAR}) ->
+    Smallest = case gb_sets:is_empty(USet) of
+                   true  -> 16#ffffffff;        % doesn't matter
+                   false -> gb_sets:smallest(USet)
+               end,
+    {OAR1, WSet1} = lists:foldl(
+                      fun ({From, {Pid, SeqNo}}, {OAR0, WSet0}) ->
+                              case (gb_sets:is_empty(USet) orelse
+                                    Smallest >= SeqNo) of
+                                  true ->
+                                      gen_server:reply(From, OAR0),
+                                      {true, gb_trees:delete(From, WSet0)};
+                                  false ->
+                                      {OAR0, WSet0}
+                              end
+                      end, {OAR, WSet}, gb_trees:to_list(WSet)),
+    State#state{waiting_set = WSet1, only_acks_received = OAR1}.
 
 handle_wait_for_confirms(From, Notify, EmptyReply,
                          State = #state{unconfirmed_set = USet,
-                                        waiting_set     = WSet}) ->
+                                        waiting_set     = WSet,
+                                        next_pub_seqno  = SeqNo}) ->
     case gb_sets:is_empty(USet) of
         true  -> {reply, EmptyReply, State};
-        false -> {noreply, State#state{waiting_set =
-                                           gb_trees:insert(From, Notify, WSet)}}
+        false -> {noreply,
+                  State#state{
+                    waiting_set =
+                        gb_trees:insert(From, {Notify, SeqNo}, WSet)}}
     end.
