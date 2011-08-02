@@ -82,6 +82,7 @@ i(port,         #state{adapter_info = I}) -> I#adapter_info.port;
 i(peer_address, #state{adapter_info = I}) -> I#adapter_info.peer_address;
 i(peer_port,    #state{adapter_info = I}) -> I#adapter_info.peer_port;
 i(name,         #state{adapter_info = I}) -> I#adapter_info.name;
+i(created_event, State)                   -> connection_info(State);
 
 i(Item, _State) -> throw({bad_argument, Item}).
 
@@ -91,7 +92,8 @@ info_keys() ->
 infos(Items, State) ->
     [{Item, i(Item, State)} || Item <- Items].
 
-additional_info(#state{adapter_info = I}) -> I#adapter_info.additional_info.
+connection_info(State = #state{adapter_info = I}) ->
+    infos(?CREATION_EVENT_KEYS, State) ++ I#adapter_info.additional_info.
 
 connect(Params = #amqp_params_direct{username     = Username,
                                      node         = Node,
@@ -102,10 +104,9 @@ connect(Params = #amqp_params_direct{username     = Username,
                          vhost        = VHost,
                          params       = Params,
                          adapter_info = ensure_adapter_info(Info)},
-    case rpc:call(Node, rabbit_direct, connect,
-                  [Username, VHost, ?PROTOCOL,
-                   infos(?CREATION_EVENT_KEYS, State1) ++
-                       additional_info(State1)]) of
+    case rpc:call(
+           Node, rabbit_direct, connect,
+           [Username, VHost, ?PROTOCOL, connection_info(State1), self()]) of
         {ok, {User, ServerProperties}} ->
             {ok, Collector} = SIF(),
             State2 = State1#state{user      = User,
