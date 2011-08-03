@@ -197,7 +197,7 @@ internal_pass_frame(Number, Frame, State) ->
             ?LOG_INFO("Dropping frame ~p for invalid or closed "
                       "channel number ~p~n", [Frame, Number]);
         {ChPid, AState} ->
-            NewAState = rabbit_reader:process_channel_frame(
+            NewAState = rabbit_amqp_0_x:process_channel_frame(
                           Frame, ChPid, Number, ChPid, AState),
             internal_update_npa(Number, ChPid, NewAState, State)
     end.

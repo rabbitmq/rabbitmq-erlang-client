@@ -4,6 +4,7 @@
   {modules, [
              gen_server2,
              priority_queue,
+             rabbit_amqp,
              rabbit_backing_queue,
              rabbit_basic,
              rabbit_binary_generator,
