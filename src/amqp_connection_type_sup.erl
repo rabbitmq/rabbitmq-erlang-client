@@ -21,24 +21,26 @@
 
 -behaviour(supervisor2).
 
--export([start_link_direct/0, start_link_network/2, start_heartbeat_fun/1]).
+-export([start_link/0, start_direct/1, start_network/3,
+         start_heartbeat_fun/1]).
 -export([init/1]).
 
 %%---------------------------------------------------------------------------
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link_direct() ->
-    {ok, Sup} = supervisor2:start_link(?MODULE, []),
+start_link() ->
+    {ok, _} = supervisor2:start_link(?MODULE, []).
+
+start_direct(Sup) ->
     {ok, Collector} =
         supervisor2:start_child(
           Sup,
           {collector, {rabbit_queue_collector, start_link, []},
            transient, ?MAX_WAIT, worker, [rabbit_queue_collector]}),
-    {ok, Sup, Collector}.
+    {ok, Collector}.
 
-start_link_network(Sock, Connection) ->
-    {ok, Sup} = supervisor2:start_link(?MODULE, []),
+start_network(Sup, Sock, Connection) ->
     {ok, AState} = rabbit_command_assembler:init(?PROTOCOL),
     {ok, Writer} =
         supervisor2:start_child(
@@ -52,10 +54,10 @@ start_link_network(Sock, Connection) ->
           {main_reader, {amqp_main_reader, start_link,
                          [Sock, Connection, AState]},
            transient, ?MAX_WAIT, worker, [amqp_main_reader]}),
-    {ok, Sup, {MainReader, AState, Writer}}.
+    {ok, MainReader, AState, Writer}.
 
-start_heartbeat_fun(SupPid) ->
-    rabbit_heartbeat:start_heartbeat_fun(SupPid).
+start_heartbeat_fun(Sup) ->
+    rabbit_heartbeat:start_heartbeat_fun(Sup).
 
 %%---------------------------------------------------------------------------
 %% supervisor2 callbacks

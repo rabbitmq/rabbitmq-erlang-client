@@ -36,7 +36,13 @@ start_link(AmqpParams) ->
             #amqp_params_network{} -> {network, amqp_network_connection}
         end,
     SChMF = start_channels_manager_fun(Sup, Type),
-    SIF = start_infrastructure_fun(Sup, Type),
+    {ok, CTSup} =
+        supervisor2:start_child(
+          Sup,
+          {connection_type_sup, {amqp_connection_type_sup, start_link, []},
+           transient, infinity, supervisor,
+           [amqp_connection_type_sup]}),
+    SIF = start_infrastructure_fun(CTSup, Type),
     {ok, Connection} = supervisor2:start_child(
                          Sup,
                          {connection, {amqp_gen_connection, start_link,
@@ -49,31 +55,17 @@ start_link(AmqpParams) ->
 %% Internal plumbing
 %%---------------------------------------------------------------------------
 
-start_infrastructure_fun(Sup, network) ->
+start_infrastructure_fun(CTSup, network) ->
     fun (Sock) ->
             Connection = self(),
-            {ok, CTSup, {MainReader, AState, Writer}} =
-                supervisor2:start_child(
-                  Sup,
-                  {connection_type_sup, {amqp_connection_type_sup,
-                                         start_link_network,
-                                         [Sock, Connection]},
-                   transient, infinity, supervisor,
-                   [amqp_connection_type_sup]}),
+            {ok, MainReader, AState, Writer} =
+                amqp_connection_type_sup:start_network(CTSup, Sock,
+                                                       Connection),
             {ok, {MainReader, AState, Writer,
                   amqp_connection_type_sup:start_heartbeat_fun(CTSup)}}
     end;
-start_infrastructure_fun(Sup, direct) ->
-    fun () ->
-            {ok, _CTSup, Collector} =
-                supervisor2:start_child(
-                  Sup,
-                  {connection_type_sup, {amqp_connection_type_sup,
-                                         start_link_direct, []},
-                   transient, infinity, supervisor,
-                   [amqp_connection_type_sup]}),
-            {ok, Collector}
-    end.
+start_infrastructure_fun(CTSup, direct) ->
+    fun () -> amqp_connection_type_sup:start_direct(CTSup) end.
 
 start_channels_manager_fun(Sup, Type) ->
     fun () ->
