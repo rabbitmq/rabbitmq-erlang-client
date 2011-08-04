@@ -30,12 +30,13 @@
 
 start_link(Type, Connection, InfraArgs, ChNumber, Consumer = {_, _}) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, [Consumer]),
-    [{gen_consumer, ConsumerPid, _, _}] = supervisor2:which_children(Sup),
+    [{writer_sup, WriterSupPid, _, _},
+     {gen_consumer, ConsumerPid, _, _}] = supervisor2:which_children(Sup),
     {ok, ChPid} = supervisor2:start_child(
                     Sup, {channel, {amqp_channel, start_link,
                                     [Type, Connection, ChNumber, ConsumerPid,
-                                     start_writer_fun(Sup, Type, InfraArgs,
-                                                      ChNumber)]},
+                                     start_writer_fun(WriterSupPid, Type,
+                                                      InfraArgs, ChNumber)]},
                           intrinsic, ?MAX_WAIT, worker, [amqp_channel]}),
     {ok, AState} = init_command_assembler(Type),
     {ok, Sup, {ChPid, AState}}.
@@ -56,12 +57,7 @@ start_writer_fun(_Sup, direct, [ConnectionPid, Node, User, VHost, Collector],
     end;
 start_writer_fun(Sup, network, [Sock], ChNumber) ->
     fun () ->
-            {ok, _} = supervisor2:start_child(
-                        Sup,
-                        {writer, {rabbit_writer, start_link,
-                                  [Sock, ChNumber, ?FRAME_MIN_SIZE, ?PROTOCOL,
-                                   self()]},
-                         intrinsic, ?MAX_WAIT, worker, [rabbit_writer]})
+            amqp_writer_sup:start_writer(Sup, Sock, ChNumber, self())
     end.
 
 init_command_assembler(direct)  -> {ok, none};
@@ -75,4 +71,6 @@ init([{ConsumerModule, ConsumerArgs}]) ->
     {ok, {{one_for_all, 0, 1},
           [{gen_consumer, {amqp_gen_consumer, start_link,
                            [ConsumerModule, ConsumerArgs]},
-           intrinsic, ?MAX_WAIT, worker, [amqp_gen_consumer]}]}}.
+           intrinsic, ?MAX_WAIT, worker, [amqp_gen_consumer]},
+           {writer_sup, {amqp_writer_sup, start_link, []},
+            intrinsic, ?MAX_WAIT, supervisor, [amqp_writer_sup]}]}}.
