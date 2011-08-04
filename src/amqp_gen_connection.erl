@@ -23,7 +23,7 @@
 
 -export([start_link/5, connect/1, open_channel/3, hard_error_in_channel/3,
          channel_internal_error/3, server_misbehaved/2, channels_terminated/1,
-         close/2, info/2, info_keys/0, info_keys/1]).
+         close/2, info/2, info_keys/0, info_keys/1, get_channel_manager/1]).
 -export([behaviour_info/1]).
 -export([init/1, terminate/2, code_change/3, handle_call/3, handle_cast/2,
          handle_info/2]).
@@ -85,6 +85,9 @@ channels_terminated(Pid) ->
 close(Pid, Close) ->
     gen_server:call(Pid, {command, {close, Close}}, infinity).
 
+get_channel_manager(Pid) ->
+    gen_server:call(Pid, get_channel_manager, infinity).
+
 info(Pid, Items) ->
     gen_server:call(Pid, {info, Items}, infinity).
 
@@ -106,12 +109,12 @@ behaviour_info(callbacks) ->
      %% terminate(Reason, FinalState) -> Ignored
      {terminate, 2},
 
-     %% connect(AmqpParams, SIF, ChMgr, State) ->
+     %% connect(AmqpParams, SIF, State) ->
      %%     {ok, ConnectParams} | {closing, ConnectParams, AmqpError, Reply} |
      %%         {error, Error}
      %% where
      %%     ConnectParams = {ServerProperties, ChannelMax, NewState}
-     {connect, 4},
+     {connect, 3},
 
      %% do(Method, State) -> Ignored
      {do, 2},
@@ -167,12 +170,14 @@ handle_call(connect, _From,
                             amqp_params = AmqpParams,
                             start_infrastructure_fun = SIF,
                             start_channels_manager_fun = SChMF}) ->
-    {ok, ChMgr} = SChMF(),
-    State1 = State0#state{channels_manager = ChMgr},
-    case Mod:connect(AmqpParams, SIF, ChMgr, MState) of
+    case Mod:connect(AmqpParams, SIF, MState) of
         {ok, Params} ->
+            {ok, ChMgr} = SChMF(),
+            State1 = State0#state{channels_manager = ChMgr},
             {reply, {ok, self()}, after_connect(Params, State1)};
         {closing, Params, #amqp_error{} = AmqpError, Error} ->
+            {ok, ChMgr} = SChMF(),
+            State1 = State0#state{channels_manager = ChMgr},
             server_misbehaved(self(), AmqpError),
             {reply, Error, after_connect(Params, State1)};
         {error, _} = Error ->
@@ -182,6 +187,9 @@ handle_call({command, Command}, From, State = #state{closing = Closing}) ->
     case Closing of false -> handle_command(Command, From, State);
                     _     -> {reply, closing, State}
     end;
+handle_call(get_channel_manager, _From,
+            State = #state{channels_manager = ChMgr}) ->
+    {reply, ChMgr, State};
 handle_call({info, Items}, _From, State) ->
     {reply, [{Item, i(Item, State)} || Item <- Items], State};
 handle_call(info_keys, _From, State = #state{module = Mod}) ->

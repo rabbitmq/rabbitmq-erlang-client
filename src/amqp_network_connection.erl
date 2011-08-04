@@ -21,7 +21,7 @@
 
 -behaviour(amqp_gen_connection).
 
--export([init/1, terminate/2, connect/4, do/2, open_channel_args/1, i/2,
+-export([init/1, terminate/2, connect/3, do/2, open_channel_args/1, i/2,
          info_keys/0, handle_message/2, closing/3, channels_terminated/1]).
 
 -define(RABBIT_TCP_OPTS, [binary, {packet, 0}, {active,false}, {nodelay, true}]).
@@ -101,23 +101,23 @@ info_keys() ->
 connect(AmqpParams = #amqp_params_network{ssl_options = none,
                                           host        = Host,
                                           port        = Port},
-        SIF, ChMgr, State) ->
+        SIF, State) ->
     case gen_tcp:connect(Host, Port, ?RABBIT_TCP_OPTS) of
-        {ok, Sock}     -> try_handshake(AmqpParams, SIF, ChMgr,
+        {ok, Sock}     -> try_handshake(AmqpParams, SIF,
                                         State#state{sock = Sock});
         {error, _} = E -> E
     end;
 connect(AmqpParams = #amqp_params_network{ssl_options = SslOpts,
                                           host        = Host,
                                           port        = Port},
-        SIF, ChMgr, State) ->
+        SIF, State) ->
     rabbit_misc:start_applications([crypto, public_key, ssl]),
     case gen_tcp:connect(Host, Port, ?RABBIT_TCP_OPTS) of
         {ok, Sock} ->
             case ssl:connect(Sock, SslOpts) of
                 {ok, SslSock} ->
                     RabbitSslSock = #ssl_socket{ssl = SslSock, tcp = Sock},
-                    try_handshake(AmqpParams, SIF, ChMgr,
+                    try_handshake(AmqpParams, SIF,
                                   State#state{sock = RabbitSslSock});
                 {error, _} = E ->
                     E
@@ -126,19 +126,19 @@ connect(AmqpParams = #amqp_params_network{ssl_options = SslOpts,
             E
     end.
 
-try_handshake(AmqpParams, SIF, ChMgr, State) ->
-    try handshake(AmqpParams, SIF, ChMgr, State) of
+try_handshake(AmqpParams, SIF, State) ->
+    try handshake(AmqpParams, SIF, State) of
         Return -> Return
     catch exit:Reason -> {error, Reason}
     end.
 
-handshake(AmqpParams, SIF, ChMgr, State0 = #state{sock = Sock}) ->
+handshake(AmqpParams, SIF, State0 = #state{sock = Sock}) ->
     ok = rabbit_net:send(Sock, ?PROTOCOL_HEADER),
-    {SHF, State1} = start_infrastructure(SIF, ChMgr, State0),
+    {SHF, State1} = start_infrastructure(SIF, State0),
     network_handshake(AmqpParams, SHF, State1).
 
-start_infrastructure(SIF, ChMgr, State = #state{sock = Sock}) ->
-    {ok, {_MainReader, _AState, Writer, SHF}} = SIF(Sock, ChMgr),
+start_infrastructure(SIF, State = #state{sock = Sock}) ->
+    {ok, {_MainReader, _AState, Writer, SHF}} = SIF(Sock),
     {SHF, State#state{writer0 = Writer}}.
 
 network_handshake(AmqpParams = #amqp_params_network{virtual_host = VHost},

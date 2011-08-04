@@ -21,7 +21,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/4]).
+-export([start_link/3]).
 -export([init/1, terminate/2, code_change/3, handle_call/3, handle_cast/2,
          handle_info/2]).
 
@@ -36,17 +36,16 @@
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Sock, Connection, ChMgr, AState) ->
-    gen_server:start_link(?MODULE, [Sock, Connection, ChMgr, AState], []).
+start_link(Sock, Connection, AState) ->
+    gen_server:start_link(?MODULE, [Sock, Connection, AState], []).
 
 %%---------------------------------------------------------------------------
 %% gen_server callbacks
 %%---------------------------------------------------------------------------
 
-init([Sock, Connection, ChMgr, AState]) ->
+init([Sock, Connection, AState]) ->
     {ok, _Ref} = rabbit_net:async_recv(Sock, 7, infinity),
-    {ok, #state{sock = Sock, connection = Connection,
-                channels_manager = ChMgr, astate = AState}}.
+    {ok, #state{sock = Sock, connection = Connection, astate = AState}}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -106,6 +105,10 @@ process_frame(Type, ChNumber, Payload, State = #state{connection = Connection}) 
 pass_frame(0, Frame, State = #state{connection = Conn, astate = AState}) ->
     State#state{astate = rabbit_reader:process_channel_frame(Frame, Conn,
                                                              0, Conn, AState)};
+pass_frame(Number, Frame, State = #state{channels_manager = undefined,
+                                         connection       = Connection}) ->
+    ChMgr = amqp_gen_connection:get_channel_manager(Connection),
+    pass_frame(Number, Frame, State#state{channels_manager = ChMgr});
 pass_frame(Number, Frame, State = #state{channels_manager = ChMgr}) ->
     amqp_channels_manager:pass_frame(ChMgr, Number, Frame),
     State.

@@ -21,7 +21,7 @@
 
 -behaviour(supervisor2).
 
--export([start_link_direct/0, start_link_network/3, start_heartbeat_fun/1]).
+-export([start_link_direct/0, start_link_network/2, start_heartbeat_fun/1]).
 -export([init/1]).
 
 %%---------------------------------------------------------------------------
@@ -37,7 +37,7 @@ start_link_direct() ->
            transient, ?MAX_WAIT, worker, [rabbit_queue_collector]}),
     {ok, Sup, Collector}.
 
-start_link_network(Sock, Connection, ChMgr) ->
+start_link_network(Sock, Connection) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, []),
     {ok, AState} = rabbit_command_assembler:init(?PROTOCOL),
     {ok, Writer} =
@@ -50,7 +50,7 @@ start_link_network(Sock, Connection, ChMgr) ->
         supervisor2:start_child(
           Sup,
           {main_reader, {amqp_main_reader, start_link,
-                         [Sock, Connection, ChMgr, AState]},
+                         [Sock, Connection, AState]},
            transient, ?MAX_WAIT, worker, [amqp_main_reader]}),
     {ok, Sup, {MainReader, AState, Writer}}.
 

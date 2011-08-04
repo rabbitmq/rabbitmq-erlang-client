@@ -50,14 +50,14 @@ start_link(AmqpParams) ->
 %%---------------------------------------------------------------------------
 
 start_infrastructure_fun(Sup, network) ->
-    fun (Sock, ChMgr) ->
+    fun (Sock) ->
             Connection = self(),
             {ok, CTSup, {MainReader, AState, Writer}} =
                 supervisor2:start_child(
                   Sup,
                   {connection_type_sup, {amqp_connection_type_sup,
                                          start_link_network,
-                                         [Sock, Connection, ChMgr]},
+                                         [Sock, Connection]},
                    transient, infinity, supervisor,
                    [amqp_connection_type_sup]}),
             {ok, {MainReader, AState, Writer,

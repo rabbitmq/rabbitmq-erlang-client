@@ -21,7 +21,7 @@
 
 -behaviour(amqp_gen_connection).
 
--export([init/1, terminate/2, connect/4, do/2, open_channel_args/1, i/2,
+-export([init/1, terminate/2, connect/3, do/2, open_channel_args/1, i/2,
          info_keys/0, handle_message/2, closing/3, channels_terminated/1]).
 
 -record(state, {node,
@@ -97,7 +97,7 @@ connect(Params = #amqp_params_direct{username     = Username,
                                      node         = Node,
                                      adapter_info = Info,
                                      virtual_host = VHost},
-        SIF, _ChMgr, State) ->
+        SIF, State) ->
     State1 = State#state{node         = Node,
                          vhost        = VHost,
                          params       = Params,
