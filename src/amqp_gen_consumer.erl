@@ -222,7 +222,9 @@ handle_call({consumer_call, Method, Args}, _From,
             #'basic.cancel_ok'{} ->
                 ConsumerModule:handle_cancel_ok(Method, Args, MState);
             #'basic.deliver'{} ->
-                ConsumerModule:handle_deliver(Method, Args, MState)
+                ConsumerModule:handle_deliver(Method, Args, MState);
+            #'basic.credit'{} ->
+                ConsumerModule:handle_credit(Method, MState)
         end,
     case Return of
         {ok, NewMState} ->

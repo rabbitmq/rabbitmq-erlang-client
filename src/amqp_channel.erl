@@ -642,6 +642,9 @@ handle_method_from_server1(
         #state{confirm_handler_pid = ConfirmHandler} = State) ->
     ConfirmHandler ! BasicNack,
     {noreply, update_confirm_set(BasicNack, handle_nack(State))};
+handle_method_from_server1(#'basic.credit'{} = Credit, none, State) ->
+    ok = call_to_consumer(Credit, none, State),
+    {noreply, State};
 
 handle_method_from_server1(Method, none, State) ->
     {noreply, rpc_bottom_half(Method, State)};

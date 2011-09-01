@@ -46,8 +46,8 @@
 
 -export([register_default_consumer/2]).
 -export([init/1, handle_consume_ok/3, handle_consume/3, handle_cancel_ok/3,
-         handle_cancel/2, handle_deliver/3, handle_info/2, handle_call/3,
-         terminate/2]).
+         handle_cancel/2, handle_deliver/3, handle_credit/2]).
+-export([handle_info/2, handle_call/3, terminate/2]).
 
 -record(state, {consumers             = dict:new(), %% Tag -> ConsumerPid
                 unassigned            = undefined,  %% Pid
@@ -148,6 +148,11 @@ handle_deliver(Deliver, Message, State) ->
     {ok, State}.
 
 %% @private
+handle_credit(Credit, State) ->
+    deliver(Credit, State),
+    {ok, State}.
+
+%% @private
 handle_info({'DOWN', _MRef, process, Pid, _Info},
             State = #state{monitors         = Monitors,
                            consumers        = Consumers,
@@ -227,7 +232,8 @@ tag(#'basic.consume'{consumer_tag = Tag})         -> Tag;
 tag(#'basic.consume_ok'{consumer_tag = Tag})      -> Tag;
 tag(#'basic.cancel'{consumer_tag = Tag})          -> Tag;
 tag(#'basic.cancel_ok'{consumer_tag = Tag})       -> Tag;
-tag(#'basic.deliver'{consumer_tag = Tag})         -> Tag.
+tag(#'basic.deliver'{consumer_tag = Tag})         -> Tag;
+tag(#'basic.credit'{consumer_tag = Tag})          -> Tag.
 
 add_to_monitor_dict(Pid, Monitors) ->
     case dict:find(Pid, Monitors) of
