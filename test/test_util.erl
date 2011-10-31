@@ -206,7 +206,7 @@ channel_lifecycle_test() ->
 abstract_method_serialization_test(BeforeFun, MultiOpFun, AfterFun) ->
     {ok, Connection} = new_connection(),
     {ok, Channel} = amqp_connection:open_channel(Connection),
-    X = uuid(),
+    X = uuid("abstract-serialization-test-x"),
     Payload = list_to_binary(["x" || _ <- lists:seq(1, 1000)]),
     OpsPerProcess = 20,
     #'exchange.declare_ok'{} =
@@ -228,7 +228,7 @@ sync_method_serialization_test() ->
     abstract_method_serialization_test(
         fun (_, _) -> ok end,
         fun (Channel, _, _, _) ->
-                Q = uuid(),
+                Q = uuid("sync-serialization-test-q"),
                 #'queue.declare_ok'{queue = Q1} =
                     amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
                 ?assertMatch(Q, Q1)
@@ -273,7 +273,7 @@ sync_async_method_serialization_test() ->
     abstract_method_serialization_test(
         fun (_, _) -> ok end,
         fun (Channel, X, _Payload, _) ->
-                Q = uuid(),
+                Q = uuid("async-serialization-test-q"),
                 %% The sync methods (called with cast to resume immediately;
                 %% the order should still be preserved)
                 amqp_channel:cast(Channel, #'queue.declare'{queue = Q}),
@@ -350,9 +350,9 @@ basic_get_test1({ok, Connection}) ->
 
 basic_return_test() ->
     {ok, Connection} = new_connection(),
-    X = uuid(),
-    Q = uuid(),
-    Key = uuid(),
+    X = uuid("return-x"),
+    Q = uuid("return-q"),
+    Key = uuid("return-key"),
     Payload = <<"qwerty">>,
     {ok, Channel} = amqp_connection:open_channel(Connection),
     amqp_channel:register_return_handler(Channel, self()),
@@ -428,9 +428,9 @@ basic_ack_call_test() ->
 basic_consume_test() ->
     {ok, Connection} = new_connection(),
     {ok, Channel} = amqp_connection:open_channel(Connection),
-    X = uuid(),
+    X = uuid("consume-x"),
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
-    RoutingKey = uuid(),
+    RoutingKey = uuid("consume-key"),
     Parent = self(),
     [spawn_link(fun () ->
                         consume_loop(Channel, X, RoutingKey, Parent, <<Tag:32>>)
@@ -461,7 +461,7 @@ consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
 consume_notification_test() ->
     {ok, Connection} = new_connection(),
     {ok, Channel} = amqp_connection:open_channel(Connection),
-    Q = uuid(),
+    Q = uuid("notification-q"),
     #'queue.declare_ok'{} =
         amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
     #'basic.consume_ok'{consumer_tag = CTag} = ConsumeOk =
@@ -505,7 +505,7 @@ simultaneous_close_test() ->
     {ok, Channel1} = amqp_connection:open_channel(Connection, ChannelNumber),
 
     %% Publish to non-existent exchange and immediately close channel
-    amqp_channel:cast(Channel1, #'basic.publish'{exchange = uuid(),
+    amqp_channel:cast(Channel1, #'basic.publish'{exchange = uuid("close-x"),
                                                 routing_key = <<"a">>},
                                #amqp_msg{payload = <<"foobar">>}),
     try amqp_channel:close(Channel1) of
@@ -521,7 +521,7 @@ simultaneous_close_test() ->
 
     %% Make sure Channel2 functions normally
     #'exchange.declare_ok'{} =
-        amqp_channel:call(Channel2, #'exchange.declare'{exchange = uuid()}),
+        amqp_channel:call(Channel2, #'exchange.declare'{exchange = uuid("sim-x")}),
 
     teardown(Connection, Channel2).
 
@@ -670,7 +670,7 @@ subscribe_nowait_test() ->
     {ok, Q} = setup_publish(Channel),
     ok = amqp_channel:call(Channel,
                            #'basic.consume'{queue = Q,
-                                            consumer_tag = uuid(),
+                                            consumer_tag = uuid("nowait-tag"),
                                             nowait = true}),
     receive #'basic.consume_ok'{} -> exit(unexpected_consume_ok)
     after 0 -> ok
@@ -723,7 +723,7 @@ large_content_test() ->
 %% all of them to have been sent.
 pub_and_close_test() ->
     {ok, Connection1} = new_connection(just_network),
-    X = uuid(), Q = uuid(), Key = uuid(),
+    X = uuid("pub-x"), Q = uuid("pub-q"), Key = uuid("pub-key"),
     Payload = <<"eggs">>, NMessages = 50000,
     {ok, Channel1} = amqp_connection:open_channel(Connection1),
     amqp_channel:call(Channel1, #'exchange.declare'{exchange = X}),
@@ -824,7 +824,7 @@ channel_flow_test() ->
 %% same argument against the same underlying gen_server instance.
 rpc_test() ->
     {ok, Connection} = new_connection(),
-    Q = uuid(),
+    Q = uuid("rpc-q"),
     Fun = fun(X) -> X + 1 end,
     RPCHandler = fun(X) -> term_to_binary(Fun(binary_to_term(X))) end,
     Server = amqp_rpc_server:start(Connection, Q, RPCHandler),
@@ -844,8 +844,8 @@ rpc_test() ->
 
 setup_publish(Channel) ->
     Publish = #publish{routing_key = <<"a.b.c.d">>,
-                       q = uuid(),
-                       x = uuid(),
+                       q = uuid("publish-q"),
+                       x = uuid("publish-x"),
                        bind_key = <<"a.b.c.*">>,
                        payload = <<"foobar">>},
     setup_publish(Channel, Publish).
@@ -906,8 +906,11 @@ latch_loop(Latch, Acc) ->
     end.
 
 uuid() ->
-    {A, B, C} = now(),
-    <<A:32, B:32, C:32>>.
+    uuid("no-prefix").
+
+uuid(Prefix) ->
+    U = erlang:md5(term_to_binary(now())),
+    list_to_binary(Prefix ++ "-" ++ base64:encode_to_string(U)).
 
 new_connection() ->
     new_connection(both, []).

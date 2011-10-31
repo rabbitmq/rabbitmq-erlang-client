@@ -53,7 +53,6 @@ run_test_in_broker:
 	{ $(IS_SUCCESS) $$TMPFILE || OK=false; } && \
 	rm $$TMPFILE && \
 	$(MAKE) boot_broker && \
-	$(MAKE) stop_test_broker_node && \
 	$$OK
 
 ## Starts a broker, configures users and runs the tests from a different node
@@ -65,12 +64,10 @@ run_test_detached: start_test_broker_node
 	    -s init stop 2>&1 | tee $$TMPFILE || OK=false; } && \
 	{ $(IS_SUCCESS) $$TMPFILE || OK=false; } && \
 	rm $$TMPFILE && \
-	$(MAKE) stop_test_broker_node && \
 	$$OK
 
 start_test_broker_node: boot_broker
 	sleep 1
-	- $(RABBITMQCTL) delete_user test_user_no_perm
 	$(RABBITMQCTL) add_user test_user_no_perm test_user_no_perm
 	sleep 1
 
