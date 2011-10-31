@@ -503,7 +503,7 @@ basic_recover_test() ->
             amqp_channel:cast(Channel,
                               #'basic.ack'{delivery_tag = DeliveryTag2})
     end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue =Q}),
+    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
     teardown(Connection, Channel).
 
 simultaneous_close_test() ->
