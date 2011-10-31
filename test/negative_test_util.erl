@@ -23,7 +23,7 @@
 
 non_existent_exchange_test() ->
     {ok, Connection} = test_util:new_connection(),
-    X = test_util:uuid(),
+    X = test_util:uuid("no-x"),
     RoutingKey = <<"a">>,
     Payload = <<"foobar">>,
     {ok, Channel} = amqp_connection:open_channel(Connection),
@@ -39,14 +39,14 @@ non_existent_exchange_test() ->
     {ok, _} = amqp_connection:open_channel(Connection),
     #'exchange.declare_ok'{} =
         amqp_channel:call(OtherChannel,
-                          #'exchange.declare'{exchange = test_util:uuid()}),
+                          #'exchange.declare'{exchange = test_util:uuid("no-x")}),
     amqp_connection:close(Connection).
 
 bogus_rpc_test() ->
     {ok, Connection} = test_util:new_connection(),
-    X = test_util:uuid(),
-    Q = test_util:uuid(),
-    R = test_util:uuid(),
+    X = test_util:uuid("bogus-x"),
+    Q = test_util:uuid("bogus-q"),
+    R = test_util:uuid("bogus-r"),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X}),
     %% Deliberately bind to a non-existent queue
@@ -59,6 +59,7 @@ bogus_rpc_test() ->
     end,
     test_util:wait_for_death(Channel),
     ?assertMatch(true, is_process_alive(Connection)),
+    {ok, Chan} = amqp_connection:open_channel(Connection),
     amqp_connection:close(Connection).
 
 hard_error_test() ->
@@ -114,7 +115,9 @@ shortstr_overflow_property_test() ->
     {ok, Connection} = test_util:new_connection(just_network),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     SentString = << <<"k">> || _ <- lists:seq(1, 340)>>,
-    Q = test_util:uuid(), X = test_util:uuid(), Key = test_util:uuid(),
+    Q = test_util:uuid("prop-q"),
+    X = test_util:uuid("prop-x"),
+    Key = test_util:uuid("prop-key"),
     Payload = <<"foobar">>,
     test_util:setup_exchange(Channel, Q, X, Key),
     Publish = #'basic.publish'{exchange = X, routing_key = Key},
@@ -123,6 +126,7 @@ shortstr_overflow_property_test() ->
     ?assertExit(_, amqp_channel:call(Channel, Publish, AmqpMsg)),
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection),
+    delete_queue(Q),
     ok.
 
 %% Attempting to send a shortstr longer than 255 bytes in a method's field
@@ -131,7 +135,9 @@ shortstr_overflow_field_test() ->
     {ok, Connection} = test_util:new_connection(just_network),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     SentString = << <<"k">> || _ <- lists:seq(1, 340)>>,
-    Q = test_util:uuid(), X = test_util:uuid(), Key = test_util:uuid(),
+    Q = test_util:uuid("field-q"),
+    X = test_util:uuid("field-x"),
+    Key = test_util:uuid("field-key"),
     test_util:setup_exchange(Channel, Q, X, Key),
     ?assertExit(_, amqp_channel:call(
                        Channel, #'basic.consume'{queue = Q,
@@ -139,6 +145,7 @@ shortstr_overflow_field_test() ->
                                                  consumer_tag = SentString})),
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection),
+    delete_queue(Q),
     ok.
 
 %% Simulates a #'connection.open'{} method received on non-zero channel. The
@@ -177,19 +184,26 @@ assert_down_with_error(MonitorRef, CodeAtom) ->
     end.
 
 non_existent_user_test() ->
-    Params = [{username, test_util:uuid()}, {password, test_util:uuid()}],
+    Params = [{username, test_util:uuid("user")},
+              {password, test_util:uuid("pass")}],
     ?assertMatch({error, auth_failure}, test_util:new_connection(Params)).
 
 invalid_password_test() ->
-    Params = [{username, <<"guest">>}, {password, test_util:uuid()}],
+    Params = [{username, <<"guest">>}, {password, test_util:uuid("pass")}],
     ?assertMatch({error, auth_failure},
                  test_util:new_connection(just_network, Params)).
 
 non_existent_vhost_test() ->
-    Params = [{virtual_host, test_util:uuid()}],
+    Params = [{virtual_host, test_util:uuid("vhost")}],
     ?assertMatch({error, access_refused}, test_util:new_connection(Params)).
 
 no_permission_test() ->
     Params = [{username, <<"test_user_no_perm">>},
               {password, <<"test_user_no_perm">>}],
     ?assertMatch({error, access_refused}, test_util:new_connection(Params)).
+
+delete_queue(Q) ->
+    {ok, Conn} = test_util:new_connection(just_network),
+    {ok, Chan} = amqp_connection:open_channel(Conn),
+    #'queue.delete_ok'{} = amqp_channel:call(Chan, #'queue.delete'{queue = Q}),
+    amqp_connection:close(Conn).
