@@ -181,7 +181,7 @@ queue_exchange_binding(Channel, X, Parent, Tag) ->
                           exchange = X,
                           routing_key = Binding},
     amqp_channel:call(Channel, Route),
-    amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
+    delete_resources([Q], []),
     Parent ! finished.
 
 nowait_exchange_declare_test() ->
@@ -232,8 +232,7 @@ sync_method_serialization_test() ->
                 #'queue.declare_ok'{queue = Q1} =
                     amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
                 ?assertMatch(Q, Q1),
-                #'queue.delete_ok'{} =
-                    amqp_channel:call(Channel, #'queue.delete'{queue = Q})
+                delete_resources([Q], [])
         end,
         fun (_, _, _, _, _) -> ok end).
 
@@ -319,8 +318,8 @@ queue_unbind_test() ->
     amqp_channel:call(Channel, Unbind),
     amqp_channel:call(Channel, Publish, Msg),
     get_and_assert_empty(Channel, Q),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], [X]).
 
 get_and_assert_empty(Channel, Q) ->
     #'basic.get_empty'{}
@@ -347,8 +346,8 @@ basic_get_test1({ok, Connection}) ->
     {ok, Q} = setup_publish(Channel),
     get_and_assert_equals(Channel, Q, <<"foobar">>),
     get_and_assert_empty(Channel, Q),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 basic_return_test() ->
     {ok, Connection} = new_connection(),
@@ -375,8 +374,8 @@ basic_return_test() ->
     after 2000 ->
         exit(no_return_received)
     end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], [X]).
 
 channel_repeat_open_close_test() ->
     {ok, Connection} = new_connection(),
@@ -417,8 +416,8 @@ basic_ack_test() ->
     {#'basic.get_ok'{delivery_tag = Tag}, _}
         = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = false}),
     amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = Tag}),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 basic_ack_call_test() ->
     {ok, Connection} = new_connection(),
@@ -427,8 +426,8 @@ basic_ack_call_test() ->
     {#'basic.get_ok'{delivery_tag = Tag}, _}
         = amqp_channel:call(Channel, #'basic.get'{queue = Q, no_ack = false}),
     amqp_channel:call(Channel, #'basic.ack'{delivery_tag = Tag}),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 basic_consume_test() ->
     {ok, Connection} = new_connection(),
@@ -461,7 +460,7 @@ consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
     #'basic.cancel_ok'{} =
         amqp_channel:call(Channel, #'basic.cancel'{consumer_tag = Tag}),
     receive #'basic.cancel_ok'{consumer_tag = Tag} -> ok end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
+    delete_resources([Q], []),
     Parent ! finished.
 
 consume_notification_test() ->
@@ -476,8 +475,7 @@ consume_notification_test() ->
     #'queue.delete_ok'{} =
         amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
     receive #'basic.cancel'{consumer_tag = CTag} -> ok end,
-    amqp_channel:close(Channel),
-    ok.
+    teardown(Connection, Channel).
 
 basic_recover_test() ->
     {ok, Connection} = new_connection(),
@@ -503,8 +501,8 @@ basic_recover_test() ->
             amqp_channel:cast(Channel,
                               #'basic.ack'{delivery_tag = DeliveryTag2})
     end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 simultaneous_close_test() ->
     {ok, Connection} = new_connection(),
@@ -567,8 +565,8 @@ basic_qos_test(Prefetch) ->
     {Res, _} = timer:tc(erlang, apply, [fun latch_loop/1, [Messages]]),
     [Kid ! stop || Kid <- Kids],
     latch_loop(length(Kids)),
-    #'queue.delete_ok'{} = amqp_channel:call(Chan, #'queue.delete'{queue = Q}),
     teardown(Connection, Chan),
+    delete_resources([Q], []),
     Res.
 
 sleeping_consumer(Channel, Sleep, Parent) ->
@@ -619,8 +617,8 @@ confirm_test() ->
          after 2000 ->
                  exit(did_not_receive_pub_ack)
          end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 confirm_barrier_test() ->
     {ok, Connection} = new_connection(),
@@ -671,8 +669,8 @@ default_consumer_test() ->
     after 1000 ->
             exit('default_consumer_didnt_work')
     end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 subscribe_nowait_test() ->
     {ok, Connection} = new_connection(),
@@ -689,8 +687,8 @@ subscribe_nowait_test() ->
         {#'basic.deliver'{delivery_tag = DTag}, _Content} ->
             amqp_channel:cast(Channel, #'basic.ack'{delivery_tag = DTag})
     end,
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 basic_nack_test() ->
     {ok, Connection} = new_connection(),
@@ -712,8 +710,8 @@ basic_nack_test() ->
                                              requeue      = false}),
 
     get_and_assert_empty(Channel, Q),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 large_content_test() ->
     {ok, Connection} = new_connection(),
@@ -726,8 +724,8 @@ large_content_test() ->
     Publish = #'basic.publish'{exchange = <<>>, routing_key = Q},
     amqp_channel:call(Channel, Publish, #amqp_msg{payload = Payload}),
     get_and_assert_equals(Channel, Q, Payload),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([Q], []).
 
 %% ----------------------------------------------------------------------------
 %% Test for the network client
@@ -760,9 +758,8 @@ pub_and_close_test() ->
     #'queue.declare_ok'{queue = Q, message_count = NRemaining} =
         amqp_channel:call(Channel2, #'queue.declare'{queue = Q}),
     ?assert(NRemaining == 0),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel2, #'queue.delete'{queue = Q}),
     teardown(Connection2, Channel2),
-    ok.
+    delete_resources([Q], []).
 
 pc_producer_loop(_, _, _, _, 0) -> ok;
 pc_producer_loop(Channel, X, Key, Payload, NRemaining) ->
@@ -851,9 +848,8 @@ rpc_test() ->
     amqp_rpc_client:stop(Client),
     amqp_rpc_server:stop(Server),
     {ok, Channel} = amqp_connection:open_channel(Connection),
-    #'queue.delete_ok'{} = amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
     teardown(Connection, Channel),
-    ok.
+    delete_resources([Q], []).
 
 %%---------------------------------------------------------------------------
 
@@ -979,3 +975,21 @@ make_direct_params(Props) ->
     #amqp_params_direct{username     = Pgv(username, <<"guest">>),
                         virtual_host = Pgv(virtual_host, <<"/">>),
                         node         = Pgv(node, node())}.
+
+delete_resources(Qs, Xs) ->
+    WithChan = fun (Act) ->
+                       {ok, Conn} = test_util:new_connection(),
+                       {ok, Chan} = amqp_connection:open_channel(Conn),
+                       try Act(Chan)
+                       catch _:_ -> ok
+                       end,
+                       amqp_connection:close(Conn)
+               end,
+    [WithChan(fun (Chan) ->
+                      amqp_channel:call(Chan, #'queue.delete'{queue = Q})
+              end) || Q <- Qs],
+    [WithChan(
+       fun (Chan) ->
+               amqp_channel:call(Chan, #'exchange.delete'{exchange = X})
+       end) || X <- Xs],
+    ok.

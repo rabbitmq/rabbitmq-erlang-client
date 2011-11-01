@@ -126,7 +126,7 @@ shortstr_overflow_property_test() ->
     ?assertExit(_, amqp_channel:call(Channel, Publish, AmqpMsg)),
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection),
-    delete_queue(Q),
+    test_util:delete_resources([Q], []),
     ok.
 
 %% Attempting to send a shortstr longer than 255 bytes in a method's field
@@ -145,7 +145,7 @@ shortstr_overflow_field_test() ->
                                                  consumer_tag = SentString})),
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection),
-    delete_queue(Q),
+    test_util:delete_resources([Q], []),
     ok.
 
 %% Simulates a #'connection.open'{} method received on non-zero channel. The
@@ -201,9 +201,3 @@ no_permission_test() ->
     Params = [{username, <<"test_user_no_perm">>},
               {password, <<"test_user_no_perm">>}],
     ?assertMatch({error, access_refused}, test_util:new_connection(Params)).
-
-delete_queue(Q) ->
-    {ok, Conn} = test_util:new_connection(just_network),
-    {ok, Chan} = amqp_connection:open_channel(Conn),
-    #'queue.delete_ok'{} = amqp_channel:call(Chan, #'queue.delete'{queue = Q}),
-    amqp_connection:close(Conn).
