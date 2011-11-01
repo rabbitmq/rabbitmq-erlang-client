@@ -153,7 +153,7 @@ amqp_uri_parse_test() ->
 
 lifecycle_test() ->
     {ok, Connection} = new_connection(),
-    X = <<"x">>,
+    X = uuid("lifecycle-x"),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     amqp_channel:call(Channel,
                       #'exchange.declare'{exchange = X,
@@ -164,7 +164,7 @@ lifecycle_test() ->
     latch_loop(),
     amqp_channel:call(Channel, #'exchange.delete'{exchange = X}),
     teardown(Connection, Channel),
-    ok.
+    delete_resources([], [X]).
 
 queue_exchange_binding(Channel, X, Parent, Tag) ->
     receive
@@ -186,14 +186,15 @@ queue_exchange_binding(Channel, X, Parent, Tag) ->
 
 nowait_exchange_declare_test() ->
     {ok, Connection} = new_connection(),
-    X = <<"x">>,
+    X = uuid("nowait-x"),
     {ok, Channel} = amqp_connection:open_channel(Connection),
     ?assertEqual(
       ok,
       amqp_channel:call(Channel, #'exchange.declare'{exchange = X,
                                                      type = <<"topic">>,
                                                      nowait = true})),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([], [X]).
 
 channel_lifecycle_test() ->
     {ok, Connection} = new_connection(),
@@ -220,7 +221,8 @@ abstract_method_serialization_test(BeforeFun, MultiOpFun, AfterFun) ->
            end) || _ <- lists:seq(1, ?Latch)],
     MultiOpRet = latch_loop(),
     AfterFun(Channel, X, Payload, BeforeRet, MultiOpRet),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([], [X]).
 
 %% This is designed to exercize the internal queuing mechanism
 %% to ensure that sync methods are properly serialized
@@ -443,7 +445,8 @@ basic_consume_test() ->
     Publish = #'basic.publish'{exchange = X, routing_key = RoutingKey},
     amqp_channel:call(Channel, Publish, #amqp_msg{payload = <<"foobar">>}),
     latch_loop(),
-    teardown(Connection, Channel).
+    teardown(Connection, Channel),
+    delete_resources([], [X]).
 
 consume_loop(Channel, X, RoutingKey, Parent, Tag) ->
     #'queue.declare_ok'{queue = Q} =
@@ -525,10 +528,11 @@ simultaneous_close_test() ->
     {ok, Channel2} = amqp_connection:open_channel(Connection, ChannelNumber),
 
     %% Make sure Channel2 functions normally
+    X = uuid("sim-x"),
     #'exchange.declare_ok'{} =
-        amqp_channel:call(Channel2, #'exchange.declare'{exchange = uuid("sim-x")}),
-
-    teardown(Connection, Channel2).
+        amqp_channel:call(Channel2, #'exchange.declare'{exchange = X}),
+    teardown(Connection, Channel2),
+    delete_resources([], [X]).
 
 channel_tune_negotiation_test() ->
     {ok, Connection} = new_connection([{channel_max, 10}]),
@@ -759,7 +763,7 @@ pub_and_close_test() ->
         amqp_channel:call(Channel2, #'queue.declare'{queue = Q}),
     ?assert(NRemaining == 0),
     teardown(Connection2, Channel2),
-    delete_resources([Q], []).
+    delete_resources([Q], [X]).
 
 pc_producer_loop(_, _, _, _, 0) -> ok;
 pc_producer_loop(Channel, X, Key, Payload, NRemaining) ->
@@ -887,7 +891,8 @@ teardown_test() ->
 
 setup_exchange(Channel, Q, X, Binding) ->
     amqp_channel:call(Channel, #'exchange.declare'{exchange = X,
-                                                   type = <<"topic">>}),
+                                                   type = <<"topic">>,
+                                                   auto_delete = true}),
     amqp_channel:call(Channel, #'queue.declare'{queue = Q}),
     Route = #'queue.bind'{queue = Q,
                           exchange = X,

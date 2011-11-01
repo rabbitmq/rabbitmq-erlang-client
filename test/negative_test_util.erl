@@ -37,10 +37,12 @@ non_existent_exchange_test() ->
 
     %% Make sure Connection and OtherChannel still serve us and are not dead
     {ok, _} = amqp_connection:open_channel(Connection),
+    X2 = test_util:uuid("no-x"),
     #'exchange.declare_ok'{} =
         amqp_channel:call(OtherChannel,
-                          #'exchange.declare'{exchange = test_util:uuid("no-x")}),
-    amqp_connection:close(Connection).
+                          #'exchange.declare'{exchange = X2}),
+    amqp_connection:close(Connection),
+    test_util:delete_resources([], [X, X2]).
 
 bogus_rpc_test() ->
     {ok, Connection} = test_util:new_connection(),
@@ -59,8 +61,9 @@ bogus_rpc_test() ->
     end,
     test_util:wait_for_death(Channel),
     ?assertMatch(true, is_process_alive(Connection)),
-    {ok, Chan} = amqp_connection:open_channel(Connection),
-    amqp_connection:close(Connection).
+    {ok, _} = amqp_connection:open_channel(Connection),
+    amqp_connection:close(Connection),
+    test_util:delete_resources([], [X]).
 
 hard_error_test() ->
     {ok, Connection} = test_util:new_connection(),
@@ -145,7 +148,7 @@ shortstr_overflow_field_test() ->
                                                  consumer_tag = SentString})),
     test_util:wait_for_death(Channel),
     test_util:wait_for_death(Connection),
-    test_util:delete_resources([Q], []),
+    test_util:delete_resources([Q], [X]),
     ok.
 
 %% Simulates a #'connection.open'{} method received on non-zero channel. The
