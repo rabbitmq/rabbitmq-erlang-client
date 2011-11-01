@@ -122,7 +122,10 @@ init([Connection, RoutingKey]) ->
 
 %% Closes the channel this gen_server instance started
 %% @private
-terminate(_Reason, #state{channel = Channel}) ->
+terminate(_Reason, #state{channel     = Channel,
+                          reply_queue = Q}) ->
+    #'queue.delete_ok'{} =
+        amqp_channel:call(Channel, #'queue.delete'{queue = Q}),
     amqp_channel:close(Channel),
     ok.
 
