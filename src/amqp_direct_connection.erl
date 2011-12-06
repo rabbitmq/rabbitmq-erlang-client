@@ -47,8 +47,10 @@ init([]) ->
 open_channel_args(#state{node = Node,
                          user = User,
                          vhost = VHost,
-                         collector = Collector}) ->
-    [self(), Node, User, VHost, Collector].
+                         collector = Collector,
+                         params = Params}) ->
+    [self(), Node, User, VHost, Collector,
+     Params#amqp_params_direct.client_properties].
 
 do(_Method, _State) ->
     ok.
