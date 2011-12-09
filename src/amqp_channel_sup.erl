@@ -48,11 +48,13 @@ start_writer_fun(_Sup, direct, [ConnectionPid, Node, User, VHost, Collector,
                                 ClientProperties],
                  ChNumber) ->
     fun () ->
+            ClientProperties1 =
+                [{<<"capabilities">>, table, ?CLIENT_CAPABILITIES} |
+                 ClientProperties],
             {ok, RabbitCh} =
                 rpc:call(Node, rabbit_direct, start_channel,
                          [ChNumber, self(), ConnectionPid, ?PROTOCOL, User,
-                          VHost, ClientProperties, ?CLIENT_CAPABILITIES,
-                          Collector]),
+                          VHost, ClientProperties1, Collector]),
             link(RabbitCh),
             {ok, RabbitCh}
     end;
