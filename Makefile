@@ -11,7 +11,7 @@
 # The Original Code is RabbitMQ.
 #
 # The Initial Developer of the Original Code is VMware, Inc.
-# Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
+# Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
 #
 
 VERSION=0.0.0
@@ -39,7 +39,7 @@ distribution: documentation source_tarball package
 
 %.app: %.app.in $(SOURCES) $(BROKER_DIR)/generate_app
 	escript  $(BROKER_DIR)/generate_app $< $@ $(SOURCE_DIR)
-	sed -i.save 's/%%VSN%%/$(VERSION)/' $@ && rm $@.save
+	sed 's/%%VSN%%/$(VERSION)/' $@ > $@.tmp && mv $@.tmp $@
 
 ###############################################################################
 ##  Dialyzer
@@ -65,7 +65,7 @@ $(DOC_DIR)/overview.edoc: $(SOURCE_DIR)/overview.edoc.in
 	sed -e 's:%%VERSION%%:$(VERSION):g' < $< > $@
 
 $(DOC_DIR)/index.html: $(DEPS_DIR)/$(COMMON_PACKAGE_DIR) $(DOC_DIR)/overview.edoc $(SOURCES)
-	$(LIBS_PATH) erl -noshell -eval 'edoc:application(amqp_client, ".", [{preprocess, true}])' -run init stop
+	$(LIBS_PATH) erl -noshell -eval 'edoc:application(amqp_client, ".", [{preprocess, true}, {macros, [{edoc, true}]}])' -run init stop
 
 ###############################################################################
 ##  Testing
