@@ -11,7 +11,7 @@
 # The Original Code is RabbitMQ.
 #
 # The Initial Developer of the Original Code is VMware, Inc.
-# Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
+# Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
 #
 
 # The client library can either be built from source control or by downloading
@@ -31,7 +31,6 @@
 # between the build requirements of the source control version and the source
 # tarball version. This avoids duplicating make definitions and rules and
 # helps keep the Makefile maintenence well factored.
-
 
 ifndef TMPDIR
 TMPDIR := /tmp

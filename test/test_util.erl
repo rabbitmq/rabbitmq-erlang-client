@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2011 VMware, Inc.  All rights reserved.
+%% Copyright (c) 2011-2012 VMware, Inc.  All rights reserved.
 %%
 
 -module(test_util).
@@ -632,6 +632,34 @@ confirm_barrier_nop_test() ->
     true = amqp_channel:wait_for_confirms(Channel),
     teardown(Connection, Channel).
 
+confirm_barrier_timeout_test() ->
+    {ok, Connection} = new_connection(),
+    {ok, Channel} = amqp_connection:open_channel(Connection),
+    #'confirm.select_ok'{} = amqp_channel:call(Channel, #'confirm.select'{}),
+    [amqp_channel:call(Channel, #'basic.publish'{routing_key = <<"whoosh">>},
+                       #amqp_msg{payload = <<"foo">>})
+     || _ <- lists:seq(1, 1000)],
+    case amqp_channel:wait_for_confirms(Channel, 0) of
+        true    -> ok;
+        timeout -> ok
+    end,
+    teardown(Connection, Channel).
+
+confirm_barrier_die_timeout_test() ->
+    {ok, Connection} = new_connection(),
+    {ok, Channel} = amqp_connection:open_channel(Connection),
+    #'confirm.select_ok'{} = amqp_channel:call(Channel, #'confirm.select'{}),
+    [amqp_channel:call(Channel, #'basic.publish'{routing_key = <<"whoosh">>},
+                       #amqp_msg{payload = <<"foo">>})
+     || _ <- lists:seq(1, 1000)],
+    try amqp_channel:wait_for_confirms_or_die(Channel, 0) of
+        true    -> ok
+    catch
+        exit:timeout -> ok
+    end,
+    amqp_connection:close(Connection),
+    wait_for_death(Connection).
+
 default_consumer_test() ->
     {ok, Connection} = new_connection(),
     {ok, Channel} = amqp_connection:open_channel(Connection),
@@ -939,7 +967,7 @@ new_connection(AllowedConnectionTypes, Params) ->
                                   {verify, verify_peer},
                                   {fail_if_no_peer_cert, true}]}] ++ Params);
             {_, "direct"} ->
-                make_direct_params([{node, rabbit_misc:makenode(rabbit)}] ++
+                make_direct_params([{node, rabbit_nodes:make(rabbit)}] ++
                                        Params)
         end,
     amqp_connection:start(Params1).
