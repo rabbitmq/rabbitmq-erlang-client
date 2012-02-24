@@ -45,13 +45,16 @@ start_link(Type, Connection, InfraArgs, ChNumber, Consumer = {_, _}) ->
 %%---------------------------------------------------------------------------
 
 start_writer_fun(_Sup, direct, [ConnPid, ConnName, Node, User, VHost,
-                                Collector],
+                                Collector, ClientProperties],
                  ChNumber) ->
     fun () ->
+            ClientProperties1 =
+                [{<<"capabilities">>, table, ?CLIENT_CAPABILITIES} |
+                 ClientProperties],
             {ok, RabbitCh} =
                 rpc:call(Node, rabbit_direct, start_channel,
                          [ChNumber, self(), ConnPid, ConnName, ?PROTOCOL, User,
-                          VHost, ?CLIENT_CAPABILITIES, Collector]),
+                          VHost, ClientProperties1, Collector]),
             link(RabbitCh),
             {ok, RabbitCh}
     end;
