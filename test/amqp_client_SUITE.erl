@@ -55,9 +55,9 @@ basic_ack_test_()                       -> ?RUN([]).
 basic_ack_call_test_()                  -> ?RUN([]).
 channel_lifecycle_test_()               -> ?RUN([]).
 queue_unbind_test_()                    -> ?RUN([]).
-sync_method_serialization_test_()       -> ?RUN([{timeout, 60}]).
-async_sync_method_serialization_test_() -> ?RUN([{timeout, 60}]).
-sync_async_method_serialization_test_() -> ?RUN([{timeout, 60}]).
+sync_method_serialization_test_()       -> ?RUN([{timeout, 90}]).
+async_sync_method_serialization_test_() -> ?RUN([{timeout, 90}]).
+sync_async_method_serialization_test_() -> ?RUN([{timeout, 180}]).
 teardown_test_()                        -> ?RUN([repeat, {timeout, 60}]).
 rpc_test_()                             -> ?RUN([]).
 pub_and_close_test_()                   -> ?RUN([{timeout, 60}]).

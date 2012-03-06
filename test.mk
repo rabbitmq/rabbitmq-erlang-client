@@ -70,8 +70,7 @@ run_test_detached: start_test_broker_node
 
 start_test_broker_node: boot_broker
 	sleep 1
-	- $(RABBITMQCTL) delete_user test_user_no_perm
-	$(RABBITMQCTL) add_user test_user_no_perm test_user_no_perm
+	-$(RABBITMQCTL) add_user test_user_no_perm test_user_no_perm
 	sleep 1
 
 stop_test_broker_node:
