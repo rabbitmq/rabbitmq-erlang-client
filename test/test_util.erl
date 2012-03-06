@@ -33,7 +33,7 @@
 
 %% The wait constant defines how long a consumer waits before it
 %% unsubscribes
--define(Wait, 200).
+-define(Wait, 800).
 
 %% AMQP URI parsing test
 amqp_uri_parse_test() ->
