@@ -115,7 +115,7 @@ do_connect({Addr, Family},
         {error, _} = E -> E
     end;
 do_connect({Addr, Family},
-           AmqpParams = #amqp_params_network{ssl_options        = SslOpts,
+           AmqpParams = #amqp_params_network{ssl_options        = SslOpts0,
                                              port               = Port,
                                              connection_timeout = Timeout,
                                              socket_options     = ExtraOpts},
@@ -125,6 +125,7 @@ do_connect({Addr, Family},
                          [Family | ?RABBIT_TCP_OPTS] ++ ExtraOpts,
                          Timeout) of
         {ok, Sock} ->
+            SslOpts = rabbit_net:ssl_opts(SslOpts0),
             case ssl:connect(Sock, SslOpts) of
                 {ok, SslSock} ->
                     RabbitSslSock = #ssl_socket{ssl = SslSock, tcp = Sock},
