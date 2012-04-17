@@ -100,7 +100,7 @@ process_frame(Type, ChNumber, Payload,
     end.
 
 next(Length, State = #state{sock = Sock}) ->
-     case rabbit_net:async_recv(Sock, Length, infinity) of
+     case rabbit_net:async_recv(Sock, Length) of
          {ok, _}         -> {noreply, State};
          {error, Reason} -> handle_error(Reason, State)
      end.
