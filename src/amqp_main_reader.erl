@@ -19,6 +19,7 @@
 
 -include("amqp_client.hrl").
 
+
 -behaviour(gen_server).
 
 -export([start_link/4]).
@@ -29,7 +30,8 @@
                 connection,
                 channels_manager,
                 astate,
-                message = none %% none | {Type, Channel, Length}
+                message = none, %% none | {Type, Channel, Length}
+                first_frame
                }).
 
 %%---------------------------------------------------------------------------
@@ -45,7 +47,8 @@ start_link(Sock, Connection, ChMgr, AState) ->
 
 init([Sock, Connection, ChMgr, AState]) ->
     case next(7, #state{sock = Sock, connection = Connection,
-                        channels_manager = ChMgr, astate = AState}) of
+                        channels_manager = ChMgr, astate = AState,
+                        first_frame = true}) of
         {noreply, State}       -> {ok, State};
         {stop, Reason, _State} -> {stop, Reason}
     end.
@@ -62,6 +65,12 @@ handle_call(Call, From, State) ->
 handle_cast(Cast, State) ->
     {stop, {unexpected_cast, Cast}, State}.
 
+handle_info({inet_async, Sock, _, {ok, <<Type:8, Channel:16, Length:32>>}},
+            State = #state{sock = Sock, first_frame = true})
+  when Type /= 1; Channel /= 0; Length > ?FRAME_MIN_SIZE ->
+    handle_error({invalid_server_response, [{frame_type, Type},
+                                           {channel,     Channel},
+                                           {'length',    Length}]}, State);
 handle_info({inet_async, Sock, _, {ok, <<Type:8, Channel:16, Length:32>>}},
             State = #state{sock = Sock, message = none}) ->
     next(Length + 1, State#state{message = {Type, Channel, Length}});
@@ -81,22 +90,23 @@ process_frame(Type, ChNumber, Payload,
               State = #state{connection       = Connection,
                              channels_manager = ChMgr,
                              astate           = AState}) ->
+    State1 = State #state {first_frame = false},
     case rabbit_command_assembler:analyze_frame(Type, Payload, ?PROTOCOL) of
         heartbeat when ChNumber /= 0 ->
             amqp_gen_connection:server_misbehaved(
                 Connection,
                 #amqp_error{name        = command_invalid,
                             explanation = "heartbeat on non-zero channel"}),
-            State;
+            State1;
         %% Match heartbeats but don't do anything with them
         heartbeat ->
-            State;
+            State1;
         AnalyzedFrame when ChNumber /= 0 ->
             amqp_channels_manager:pass_frame(ChMgr, ChNumber, AnalyzedFrame),
-            State;
+            State1;
         AnalyzedFrame ->
-            State#state{astate = amqp_channels_manager:process_channel_frame(
-                                   AnalyzedFrame, 0, Connection, AState)}
+            State1#state{astate = amqp_channels_manager:process_channel_frame(
+                                    AnalyzedFrame, 0, Connection, AState)}
     end.
 
 next(Length, State = #state{sock = Sock}) ->
