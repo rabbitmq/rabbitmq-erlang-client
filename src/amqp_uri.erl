@@ -31,7 +31,7 @@
 %%      Info = any()
 %%
 %% @doc Parses an AMQP URI.  If any of the URI parts are missing, the
-%% default values are used.  If the hostname is zero-length, an
+%% default values are used.  If the scheme is "rabbit-direct", an
 %% #amqp_params_direct{} record is returned; otherwise, an
 %% #amqp_params_network{} record is returned.  Extra parameters may be
 %% specified via the query string (e.g. "?heartbeat=5"). In case of
@@ -44,15 +44,7 @@
 parse(Uri) -> parse(Uri, <<"/">>).
 
 parse(Uri, DefaultVHost) ->
-    try case parse1(Uri, DefaultVHost) of
-            {ok, #amqp_params_network{host         = undefined,
-                                      username     = User,
-                                      virtual_host = Vhost}} ->
-                return({ok, #amqp_params_direct{username     = User,
-                                                virtual_host = Vhost}});
-            {ok, Params} ->
-                return({ok, Params})
-        end
+    try return(parse1(Uri, DefaultVHost))
     catch throw:Err -> {error, {Err, Uri}};
           error:Err -> {error, {Err, Uri}}
     end.
@@ -65,8 +57,9 @@ parse1(Uri, DefaultVHost) when is_list(Uri) ->
         Parsed ->
             Endpoint =
                 case string:to_lower(proplists:get_value(scheme, Parsed)) of
-                    "amqp"  -> build_broker(Parsed, DefaultVHost);
-                    "amqps" -> build_ssl_broker(Parsed, DefaultVHost);
+                    "amqp"         -> build_broker(Parsed, DefaultVHost);
+                    "amqps"        -> build_ssl_broker(Parsed, DefaultVHost);
+                    "rabbit-direct"-> build_direct_broker(Parsed, DefaultVHost);
                     Scheme  -> fail({unexpected_uri_scheme, Scheme})
                 end,
             return({ok, broker_add_query(Endpoint, Parsed)})
@@ -117,6 +110,24 @@ build_broker(ParsedUri, DefaultVHost) ->
         _          -> Ps
     end.
 
+build_direct_broker(ParsedUri, DefaultVHost) ->
+    [UserInfo, Host, Path] =
+        [proplists:get_value(F, ParsedUri) || F <- [userinfo, host, path]],
+    VHost = case Path of
+                undefined -> DefaultVHost;
+                [$/|Rest] -> case string:chr(Rest, $/) of
+                                 0 -> list_to_binary(unescape_string(Rest));
+                                 _ -> fail({invalid_vhost, Rest})
+                             end
+            end,
+    Ps = #amqp_params_direct{node         = unescape_string(Host),
+                             virtual_host = VHost},
+    case UserInfo of
+        [U | _]    -> Ps#amqp_params_direct{
+                        username = list_to_binary(unescape_string(U))};
+        _          -> Ps
+    end.
+
 build_ssl_broker(ParsedUri, DefaultVHost) ->
     Params = build_broker(ParsedUri, DefaultVHost),
     Query = proplists:get_value('query', ParsedUri),
@@ -143,7 +154,10 @@ build_ssl_broker(ParsedUri, DefaultVHost) ->
     Params#amqp_params_network{ssl_options = SSLOptions}.
 
 broker_add_query(Params = #amqp_params_network{}, Uri) ->
-    broker_add_query(Params, Uri, record_info(fields, amqp_params_network)).
+    broker_add_query(Params, Uri, record_info(fields, amqp_params_network));
+
+broker_add_query(Params = #amqp_params_direct{}, Uri) ->
+    broker_add_query(Params, Uri, record_info(fields, amqp_params_direct)).
 
 broker_add_query(Params, ParsedUri, Fields) ->
     Query = proplists:get_value('query', ParsedUri),
