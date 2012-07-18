@@ -89,17 +89,10 @@ build_broker(ParsedUri, DefaultVHost) ->
         true  -> ok;
         false -> fail({port_out_of_range, Port})
     end,
-    VHost = case Path of
-                undefined -> DefaultVHost;
-                [$/|Rest] -> case string:chr(Rest, $/) of
-                                 0 -> list_to_binary(unescape_string(Rest));
-                                 _ -> fail({invalid_vhost, Rest})
-                             end
-            end,
     UserInfo = proplists:get_value(userinfo, ParsedUri),
     Ps = #amqp_params_network{host            = unescape_string(Host),
                               port            = Port,
-                              virtual_host    = VHost,
+                              virtual_host    = vhost(Path, DefaultVHost),
                               auth_mechanisms = mechanisms(ParsedUri)},
     case UserInfo of
         [U, P | _] -> Ps#amqp_params_network{
@@ -113,19 +106,15 @@ build_broker(ParsedUri, DefaultVHost) ->
 build_direct_broker(ParsedUri, DefaultVHost) ->
     [UserInfo, Host, Path] =
         [proplists:get_value(F, ParsedUri) || F <- [userinfo, host, path]],
-    VHost = case Path of
-                undefined -> DefaultVHost;
-                [$/|Rest] -> case string:chr(Rest, $/) of
-                                 0 -> list_to_binary(unescape_string(Rest));
-                                 _ -> fail({invalid_vhost, Rest})
-                             end
-            end,
-    Ps = #amqp_params_direct{node         = unescape_string(Host),
-                             virtual_host = VHost},
+    Ps  = #amqp_params_direct{virtual_host = vhost(Path, DefaultVHost)},
+    Ps1 = case Host =:= undefined of
+             true  -> Ps;
+             false -> Ps#amqp_params_direct{node = unescape_string(Host)}
+         end,
     case UserInfo of
-        [U | _]    -> Ps#amqp_params_direct{
-                        username = list_to_binary(unescape_string(U))};
-        _          -> Ps
+        [U | _]    -> Ps1#amqp_params_direct{
+                         username = list_to_binary(unescape_string(U))};
+        _          -> Ps1
     end.
 
 build_ssl_broker(ParsedUri, DefaultVHost) ->
@@ -215,6 +204,15 @@ mechanisms(ParsedUri) ->
          [M, F] -> fun (R, P, S) -> M:F(R, P, S) end;
          L      -> throw({not_mechanism, L})
      end || Mech <- Mechanisms].
+
+vhost(Path, DefaultVHost) ->
+    case Path of
+        undefined -> DefaultVHost;
+        [$/|Rest] -> case string:chr(Rest, $/) of
+                         0 -> list_to_binary(unescape_string(Rest));
+                         _ -> fail({invalid_vhost, Rest})
+                     end
+    end.
 
 %% --=: Plain state monad implementation start :=--
 run_state_monad(FunList, State) ->
