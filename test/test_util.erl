@@ -53,7 +53,6 @@ amqp_uri_parse_test() ->
                                            virtual_host = <<"v/host">>}},
                  amqp_uri:parse(
                    "aMQp://user%61:%61pass@ho%61st:10000/v%2fhost")),
-    ?assertMatch({ok, #amqp_params_network{}}, amqp_uri:parse("amqp://")),
     ?assertMatch({ok, #amqp_params_network{username     = <<"">>,
                                            virtual_host = <<"">>}},
                  amqp_uri:parse("amqp://:@/")),
@@ -71,8 +70,6 @@ amqp_uri_parse_test() ->
     ?assertMatch({ok, #amqp_params_network{host         = "host",
                                            virtual_host = <<"/">>}},
                  amqp_uri:parse("amqp://host")),
-    ?assertMatch({ok, #amqp_params_network{}},
-                 amqp_uri:parse("amqp://")),
     ?assertMatch({ok, #amqp_params_network{port = 10000,
                                            host = "localhost"}},
                  amqp_uri:parse("amqp://localhost:10000")),
@@ -127,6 +124,7 @@ amqp_uri_parse_test() ->
                  amqp_uri:parse("amqp://user:pass@[::1]:100")),
 
     %% Direct connection
+    ?assertMatch({ok, #amqp_params_direct{}}, amqp_uri:parse("amqp://")),
     ?assertMatch({ok, #amqp_params_direct{}},
                  amqp_uri:parse("rabbit-direct://")),
     ?assertMatch({ok, #amqp_params_direct{node = "name@node"}},

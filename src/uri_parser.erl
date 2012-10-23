@@ -40,7 +40,7 @@
 %% 'fragment'.
 
 parse(AbsURI, Defaults) ->
-    case parse_scheme(AbsURI) of
+    case parse_scheme(legacy_support(AbsURI)) of
 	{error, Reason} ->
 	    {error, Reason};
 	{Scheme, Rest} ->
@@ -119,3 +119,9 @@ merge_keylists(A, B) ->
     [AEmptyS, ANonEmptyS, BS] =
         [lists:ukeysort(1, X) || X <- [AEmpty, ANonEmpty, B]],
     lists:ukeymerge(1, lists:ukeymerge(1, ANonEmptyS, BS), AEmptyS).
+
+legacy_support(URI) ->
+    case string:to_lower(URI) of
+        "amqp://" -> "rabbit-direct://";
+        _         -> URI
+    end.
