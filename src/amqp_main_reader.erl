@@ -29,8 +29,12 @@
                 connection,
                 channels_manager,
                 astate,
-                message = none %% none | {Type, Channel, Length}
+                message, %% opening, none | {Type, Channel, Length}
+                requested = 0,
+                received
                }).
+
+-define(FRAME_HEADERLEN, 7).
 
 %%---------------------------------------------------------------------------
 %% Interface
@@ -44,8 +48,9 @@ start_link(Sock, Connection, ChMgr, AState) ->
 %%---------------------------------------------------------------------------
 
 init([Sock, Connection, ChMgr, AState]) ->
-    case next(7, #state{sock = Sock, connection = Connection,
-                        channels_manager = ChMgr, astate = AState}) of
+    case next(?FRAME_HEADERLEN, #state{sock = Sock, connection = Connection,
+                        channels_manager = ChMgr, astate = AState,
+                        message = opening, requested = ?FRAME_HEADERLEN}) of
         {noreply, State}       -> {ok, State};
         {stop, Reason, _State} -> {stop, Reason}
     end.
@@ -62,13 +67,35 @@ handle_call(Call, From, State) ->
 handle_cast(Cast, State) ->
     {stop, {unexpected_cast, Cast}, State}.
 
+handle_info({inet_async, Sock, _, {ok, <<"AMQP", _:24>> = Data}},
+            State = #state{sock = Sock, message = opening}) ->
+    next(1, State#state{requested = 1, received  = Data});
+handle_info({inet_async, Sock, _, {ok, <<D:8>>}},
+            State = #state{sock      = Sock,
+                           message   = opening,
+                           requested = 1,
+                           received  = Data}) ->
+    <<"AMQP", A, B, C>> = Data,
+    handle_error({refused, {A, B, C, D}},
+                 State#state{requested = 0, received  = undefined});
+handle_info({inet_async, Sock, _R, {ok, <<_D:(?FRAME_HEADERLEN * 8)>>}} = Arg,
+            State = #state{sock      = Sock,
+                           message   = opening,
+                           requested = ?FRAME_HEADERLEN}) ->
+    handle_info(Arg, State#state{message = none});
 handle_info({inet_async, Sock, _, {ok, <<Type:8, Channel:16, Length:32>>}},
-            State = #state{sock = Sock, message = none}) ->
-    next(Length + 1, State#state{message = {Type, Channel, Length}});
+            State = #state{sock      = Sock,
+                           message   = none,
+                           requested = ?FRAME_HEADERLEN}) ->
+    next(Length + 1, State#state{message   = {Type, Channel, Length},
+                                 requested = Length + 1});
 handle_info({inet_async, Sock, _, {ok, Data}},
             State = #state{sock = Sock, message = {Type, Channel, L}}) ->
     <<Payload:L/binary, ?FRAME_END>> = Data,
-    next(7, process_frame(Type, Channel, Payload, State#state{message = none}));
+    next(?FRAME_HEADERLEN,
+         process_frame(Type, Channel, Payload,
+                       State#state{message   = none,
+                                   requested = ?FRAME_HEADERLEN}));
 handle_info({inet_async, Sock, _, {error, Reason}},
             State = #state{sock = Sock}) ->
     handle_error(Reason, State).
@@ -107,6 +134,9 @@ next(Length, State = #state{sock = Sock}) ->
 
 handle_error(closed, State = #state{connection = Conn}) ->
     Conn ! socket_closed,
+    {noreply, State};
+handle_error({refused, Version},  State = #state{connection = Conn}) ->
+    Conn ! {refused, Version},
     {noreply, State};
 handle_error(Reason, State = #state{connection = Conn}) ->
     Conn ! {socket_error, Reason},
