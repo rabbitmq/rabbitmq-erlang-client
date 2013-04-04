@@ -71,7 +71,7 @@ handle_info({inet_async, Sock, _, {ok, Data}},
     next(7, process_frame(Type, Channel, Payload, State#state{message = none}));
 handle_info({inet_async, Sock, _, {error, Reason}},
             State = #state{sock = Sock}) ->
-    handle_error(Reason, State).
+    handle_error({socket_error, Reason}, State).
 
 %%---------------------------------------------------------------------------
 %% Internal plumbing
@@ -99,15 +99,20 @@ process_frame(Type, ChNumber, Payload,
                                    AnalyzedFrame, 0, Connection, AState)}
     end.
 
-next(Length, State = #state{sock = Sock}) ->
+next(Length, State = #state{sock = Sock}) when Length =< ?TCP_MAX_PACKET_SIZE ->
      case rabbit_net:async_recv(Sock, Length, infinity) of
          {ok, _}         -> {noreply, State};
          {error, Reason} -> handle_error(Reason, State)
-     end.
+     end;
+next(Length, State) ->
+    handle_error({error, {oversize_network_request, Length}}, State).
 
-handle_error(closed, State = #state{connection = Conn}) ->
+handle_error({error, _} = Err, State = #state{connection = Conn}) ->
+    Conn ! Err,
+    {stop, Err, State};
+handle_error({socket_error, closed}, State = #state{connection = Conn}) ->
     Conn ! socket_closed,
     {noreply, State};
-handle_error(Reason, State = #state{connection = Conn}) ->
-    Conn ! {socket_error, Reason},
-    {stop, {socket_error, Reason}, State}.
+handle_error({socket_error, _} = Err, State = #state{connection = Conn}) ->
+    Conn ! Err,
+    {stop, Err, State}.

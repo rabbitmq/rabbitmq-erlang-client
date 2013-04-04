@@ -299,6 +299,8 @@ handshake_recv(Expecting) ->
             end;
         {socket_error, _} = SocketError ->
             exit({SocketError, {expecting, Expecting}});
+        {error, Reason} ->
+            exit(Reason);
         heartbeat_timeout ->
             exit(heartbeat_timeout);
         Other ->

@@ -22,6 +22,7 @@
 -define(PROTOCOL, rabbit_framing_amqp_0_9_1).
 
 -define(MAX_CHANNEL_NUMBER, 65535).
+-define(TCP_MAX_PACKET_SIZE, 16#4000000).
 
 -define(LOG_DEBUG(Format),      error_logger:info_msg(Format)).
 -define(LOG_INFO(Format, Args), error_logger:info_msg(Format, Args)).
