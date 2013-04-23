@@ -579,13 +579,19 @@ rpc_bottom_half(Reply, State = #state{rpc_requests = RequestQueue}) ->
     end,
     do_rpc(State#state{rpc_requests = RequestQueue1}).
 
+is_method_synchronous(#'basic.credit'{})         -> true;
+is_method_synchronous(#'basic.credit_ok'{})      -> false;
+is_method_synchronous(#'basic.credit_drained'{}) -> false;
+
+is_method_synchronous(Method) -> ?PROTOCOL:is_method_synchronous(Method).
+
 do_rpc(State = #state{rpc_requests = Q,
                       closing      = Closing}) ->
     case queue:out(Q) of
         {{value, {From, Sender, Method, Content, Flow}}, NewQ} ->
             State1 = pre_do(Method, Content, Sender, State),
             DoRet = do(Method, Content, Flow, State1),
-            case ?PROTOCOL:is_method_synchronous(Method) of
+            case is_method_synchronous(Method) of
                 true  -> State1;
                 false -> case {From, DoRet} of
                              {none, _} -> ok;
@@ -826,6 +832,10 @@ check_invalid_method(Method) ->
                   "Sending connection methods is not allowed"};
         false -> ok
     end.
+
+is_connection_method(#'basic.credit'{})         -> false;
+is_connection_method(#'basic.credit_ok'{})      -> false;
+is_connection_method(#'basic.credit_drained'{}) -> false;
 
 is_connection_method(Method) ->
     {ClassId, _} = ?PROTOCOL:method_id(element(1, Method)),
