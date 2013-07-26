@@ -21,7 +21,7 @@
 
 -behaviour(gen_server).
 
--export([start_link/5, connect/1, open_channel/3, hard_error_in_channel/3,
+-export([start_link/3, connect/3, open_channel/3, hard_error_in_channel/3,
          channel_internal_error/3, server_misbehaved/2, channels_terminated/1,
          close/3, server_close/2, info/2, info_keys/0, info_keys/1]).
 -export([behaviour_info/1]).
@@ -33,13 +33,10 @@
 
 -record(state, {module,
                 module_state,
-                sup,
                 channels_manager,
                 amqp_params,
                 channel_max,
                 server_properties,
-                start_infrastructure_fun,
-                start_channels_manager_fun,
                 closing = false %% #closing{} | false
                }).
 
@@ -51,13 +48,11 @@
 %% Interface
 %%---------------------------------------------------------------------------
 
-start_link(Mod, AmqpParams, SIF, SChMF, ExtraParams) ->
-    gen_server:start_link(?MODULE,
-                          [Mod, self(), AmqpParams, SIF, SChMF, ExtraParams],
-                          []).
+start_link(Mod, AmqpParams, ExtraParams) ->
+    gen_server:start_link(?MODULE, [Mod, AmqpParams, ExtraParams], []).
 
-connect(Pid) ->
-    gen_server:call(Pid, connect, infinity).
+connect(Pid, ChMgr, Extra) ->
+    gen_server:call(Pid, {connect, ChMgr, Extra}, infinity).
 
 open_channel(Pid, ProposedNumber, Consumer) ->
     case gen_server:call(Pid,
@@ -107,12 +102,14 @@ behaviour_info(callbacks) ->
      %% terminate(Reason, FinalState) -> Ignored
      {terminate, 2},
 
-     %% connect(AmqpParams, SIF, ChMgr, State) ->
+     {socket, 1},
+
+     %% connect(AmqpParams, Extra, State) ->
      %%     {ok, ConnectParams} | {closing, ConnectParams, AmqpError, Reply} |
      %%         {error, Error}
      %% where
      %%     ConnectParams = {ServerProperties, ChannelMax, NewState}
-     {connect, 4},
+     {connect, 3},
 
      %% do(Method, State) -> Ignored
      {do, 2},
@@ -153,7 +150,7 @@ callback(Function, Params, State = #state{module = Mod,
 %% gen_server callbacks
 %%---------------------------------------------------------------------------
 
-init([Mod, Sup, AmqpParams, SIF, SChMF, ExtraParams]) ->
+init([Mod, AmqpParams, ExtraParams]) ->
     %% Trapping exits since we need to make sure that the `terminate/2' is
     %% called in the case of direct connection (it does not matter for a network
     %% connection).  See bug25116.
@@ -161,20 +158,14 @@ init([Mod, Sup, AmqpParams, SIF, SChMF, ExtraParams]) ->
     {ok, MState} = Mod:init(ExtraParams),
     {ok, #state{module = Mod,
                 module_state = MState,
-                sup = Sup,
-                amqp_params = AmqpParams,
-                start_infrastructure_fun = SIF,
-                start_channels_manager_fun = SChMF}}.
+                amqp_params = AmqpParams}}.
 
-handle_call(connect, _From,
+handle_call({connect, ChMgr, Extra}, _From,
             State0 = #state{module = Mod,
                             module_state = MState,
-                            amqp_params = AmqpParams,
-                            start_infrastructure_fun = SIF,
-                            start_channels_manager_fun = SChMF}) ->
-    {ok, ChMgr} = SChMF(),
+                            amqp_params = AmqpParams}) ->
     State1 = State0#state{channels_manager = ChMgr},
-    case Mod:connect(AmqpParams, SIF, ChMgr, MState) of
+    case Mod:connect(AmqpParams, Extra, MState) of
         {ok, Params} ->
             {reply, {ok, self()}, after_connect(Params, State1)};
         {closing, Params, #amqp_error{} = AmqpError, Error} ->

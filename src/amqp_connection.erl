@@ -158,8 +158,10 @@ start(AmqpParams) ->
             _ ->
                 AmqpParams
         end,
-    {ok, _Sup, Connection} = amqp_sup:start_connection_sup(AmqpParams1),
-    amqp_gen_connection:connect(Connection).
+    case amqp_sup:start_connection_sup(AmqpParams1) of
+        {ok, _Sup, Connection} -> {ok, Connection};
+        Err                    -> Err
+    end.
 
 %% Usually the amqp_client application will already be running. We
 %% check whether that is the case by invoking an undocumented function

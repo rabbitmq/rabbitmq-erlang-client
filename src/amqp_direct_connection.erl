@@ -23,8 +23,8 @@
 
 -export([server_close/3]).
 
--export([init/1, terminate/2, connect/4, do/2, open_channel_args/1, i/2,
-         info_keys/0, handle_message/2, closing/3, channels_terminated/1]).
+-export([init/1, terminate/2, socket/1, connect/3, do/2, open_channel_args/1,
+         i/2, info_keys/0, handle_message/2, closing/3, channels_terminated/1]).
 
 -export([socket_adapter_info/2]).
 
@@ -115,12 +115,14 @@ infos(Items, State) ->
 connection_info(State = #state{adapter_info = I}) ->
     infos(?CREATION_EVENT_KEYS, State) ++ I#amqp_adapter_info.additional_info.
 
+socket(_Params) -> {ok, no_socket}.
+
 connect(Params = #amqp_params_direct{username     = Username,
                                      password     = Password,
                                      node         = Node,
                                      adapter_info = Info,
                                      virtual_host = VHost},
-        SIF, _ChMgr, State) ->
+        Collector, State) ->
     State1 = State#state{node         = Node,
                          vhost        = VHost,
                          params       = Params,
@@ -133,7 +135,6 @@ connect(Params = #amqp_params_direct{username     = Username,
                   [AuthToken, VHost, ?PROTOCOL, self(),
                    connection_info(State1)]) of
         {ok, {User, ServerProperties}} ->
-            {ok, Collector} = SIF(),
             State2 = State1#state{user      = User,
                                   collector = Collector},
             {ok, {ServerProperties, 0, State2}};

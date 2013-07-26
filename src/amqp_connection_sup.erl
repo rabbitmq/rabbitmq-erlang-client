@@ -29,66 +29,61 @@
 %%---------------------------------------------------------------------------
 
 start_link(AmqpParams) ->
-    {ok, Sup} = supervisor2:start_link(?MODULE, []),
     {Type, Module} =
         case AmqpParams of
             #amqp_params_direct{}  -> {direct,  amqp_direct_connection};
             #amqp_params_network{} -> {network, amqp_network_connection}
         end,
-    SChMF = start_channels_manager_fun(Sup, Type),
-    SIF = start_infrastructure_fun(Sup, Type),
+    case Module:socket(AmqpParams) of
+        {ok, Sock} ->
+            start_link(AmqpParams, Type, Module, Sock);
+        Err ->
+            Err
+    end.
+
+start_link(AmqpParams, Type, Module, Sock) ->
+    {ok, Sup} = supervisor2:start_link(?MODULE, []),
     {ok, Connection} = supervisor2:start_child(
                          Sup,
                          {connection, {amqp_gen_connection, start_link,
-                                       [Module, AmqpParams, SIF, SChMF, []]},
+                                       [Module, AmqpParams, []]},
                           intrinsic, brutal_kill, worker,
                           [amqp_gen_connection]}),
-    {ok, Sup, Connection}.
-
-%%---------------------------------------------------------------------------
-%% Internal plumbing
-%%---------------------------------------------------------------------------
-
-start_infrastructure_fun(Sup, network) ->
-    fun (Sock, ChMgr) ->
-            Connection = self(),
-            {ok, CTSup, {MainReader, AState, Writer}} =
-                supervisor2:start_child(
-                  Sup,
-                  {connection_type_sup, {amqp_connection_type_sup,
-                                         start_link_network,
-                                         [Sock, Connection, ChMgr]},
-                   transient, infinity, supervisor,
-                   [amqp_connection_type_sup]}),
-            {ok, {MainReader, AState, Writer,
-                  amqp_connection_type_sup:start_heartbeat_fun(CTSup)}}
-    end;
-start_infrastructure_fun(Sup, direct) ->
-    fun () ->
-            {ok, _CTSup, Collector} =
-                supervisor2:start_child(
-                  Sup,
-                  {connection_type_sup, {amqp_connection_type_sup,
-                                         start_link_direct, []},
-                   intrinsic, infinity, supervisor,
-                   [amqp_connection_type_sup]}),
-            {ok, Collector}
-    end.
-
-start_channels_manager_fun(Sup, Type) ->
-    fun () ->
-            Connection = self(),
-            {ok, ChSupSup} = supervisor2:start_child(
+    {ok, ChSupSup} = supervisor2:start_child(
                        Sup,
                        {channel_sup_sup, {amqp_channel_sup_sup, start_link,
                                           [Type, Connection]},
                         intrinsic, infinity, supervisor,
                         [amqp_channel_sup_sup]}),
-            {ok, _} = supervisor2:start_child(
-                        Sup,
-                        {channels_manager, {amqp_channels_manager, start_link,
-                                            [Connection, ChSupSup]},
-                         transient, ?MAX_WAIT, worker, [amqp_channels_manager]})
+    {ok, ChMgr} = supervisor2:start_child(
+                    Sup,
+                    {channels_manager, {amqp_channels_manager, start_link,
+                                        [Connection, ChSupSup]},
+                     transient, ?MAX_WAIT, worker, [amqp_channels_manager]}),
+    Extra = case Type of
+                direct ->
+                    {ok, _CTSup, Collector} =
+                        supervisor2:start_child(
+                          Sup,
+                          {connection_type_sup, {amqp_connection_type_sup,
+                                                 start_link_direct, []},
+                           intrinsic, infinity, supervisor,
+                           [amqp_connection_type_sup]}),
+                    Collector;
+                network ->
+                    {ok, CTSup, {_MainReader, _AState, Writer}} =
+                        supervisor2:start_child(
+                          Sup,
+                          {connection_type_sup, {amqp_connection_type_sup,
+                                                 start_link_network,
+                                                 [Sock, Connection, ChMgr]},
+                           transient, infinity, supervisor,
+                           [amqp_connection_type_sup]}),
+                    {Sock, Writer, CTSup}
+            end,
+    case amqp_gen_connection:connect(Connection, ChMgr, Extra) of
+        ok  -> {ok, Sup, Connection};
+        Err -> Err
     end.
 
 %%---------------------------------------------------------------------------
