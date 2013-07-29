@@ -32,10 +32,10 @@ start_link(Type, Connection, InfraArgs, ChNumber, Consumer = {_, _}) ->
     {ok, Sup} = supervisor2:start_link(?MODULE, [Consumer]),
     [{gen_consumer, ConsumerPid, _, _}] = supervisor2:which_children(Sup),
     {ok, ChPid} = supervisor2:start_child(
-                    Sup, {channel, {amqp_channel, start_link,
-                                    [Type, Connection, ChNumber, ConsumerPid,
-                                     start_writer_fun(Sup, Type, InfraArgs,
-                                                      ChNumber)]},
+                    Sup, {channel,
+                          {amqp_channel, start_link,
+                           [Type, Connection, ChNumber, ConsumerPid,
+                            start_writer(Sup, Type, InfraArgs, ChNumber)]},
                           intrinsic, ?MAX_WAIT, worker, [amqp_channel]}),
     {ok, AState} = init_command_assembler(Type),
     {ok, Sup, {ChPid, AState}}.
@@ -44,26 +44,22 @@ start_link(Type, Connection, InfraArgs, ChNumber, Consumer = {_, _}) ->
 %% Internal plumbing
 %%---------------------------------------------------------------------------
 
-start_writer_fun(_Sup, direct, [ConnPid, ConnName, Node, User, VHost,
-                                Collector],
-                 ChNumber) ->
-    fun () ->
-            {ok, RabbitCh} =
-                rpc:call(Node, rabbit_direct, start_channel,
-                         [ChNumber, self(), ConnPid, ConnName, ?PROTOCOL, User,
-                          VHost, ?CLIENT_CAPABILITIES, Collector]),
-            link(RabbitCh),
-            {ok, RabbitCh}
-    end;
-start_writer_fun(Sup, network, [Sock, FrameMax], ChNumber) ->
-    fun () ->
-            {ok, _} = supervisor2:start_child(
-                        Sup,
-                        {writer, {rabbit_writer, start_link,
-                                  [Sock, ChNumber, FrameMax, ?PROTOCOL,
-                                   self()]},
-                         intrinsic, ?MAX_WAIT, worker, [rabbit_writer]})
-    end.
+start_writer(_Sup, direct, [ConnPid, ConnName, Node, User, VHost, Collector],
+             ChNumber) ->
+    {ok, RabbitCh} =
+        rpc:call(Node, rabbit_direct, start_channel,
+                 [ChNumber, self(), ConnPid, ConnName, ?PROTOCOL, User,
+                  VHost, ?CLIENT_CAPABILITIES, Collector]),
+    link(RabbitCh),
+    RabbitCh;
+start_writer(Sup, network, [Sock, FrameMax], ChNumber) ->
+    {ok, Writer} = supervisor2:start_child(
+                     Sup,
+                     {writer, {rabbit_writer, start_link,
+                               [Sock, ChNumber, FrameMax, ?PROTOCOL,
+                                self()]},
+                      intrinsic, ?MAX_WAIT, worker, [rabbit_writer]}),
+    Writer.
 
 init_command_assembler(direct)  -> {ok, none};
 init_command_assembler(network) -> rabbit_command_assembler:init(?PROTOCOL).
