@@ -64,7 +64,7 @@
 %% @doc This function registers a default consumer with the channel. A
 %% default consumer is used when a subscription is made via
 %% amqp_channel:call(ChannelPid, #'basic.consume'{}) (rather than
-%% {@module}:subscribe/3) and hence there is no consumer pid
+%% amqp_channel:subscribe/3) and hence there is no consumer pid
 %% registered with the consumer tag. In this case, the relevant
 %% deliveries will be sent to the default consumer.
 register_default_consumer(ChannelPid, ConsumerPid) ->
