@@ -38,7 +38,7 @@
                 connected_at
                }).
 
--define(INFO_KEYS, [type]).
+-define(INFO_KEYS, [type, internal_user]).
 
 -define(CREATION_EVENT_KEYS, [pid, protocol, host, port, name,
                               peer_host, peer_port,
@@ -108,7 +108,7 @@ i(port,         #state{adapter_info = I}) -> I#amqp_adapter_info.port;
 i(peer_host,    #state{adapter_info = I}) -> I#amqp_adapter_info.peer_host;
 i(peer_port,    #state{adapter_info = I}) -> I#amqp_adapter_info.peer_port;
 i(name,         #state{adapter_info = I}) -> I#amqp_adapter_info.name;
-
+i(internal_user, #state{user = U}) -> U;
 i(Item, _State) -> throw({bad_argument, Item}).
 
 info_keys() ->
