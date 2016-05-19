@@ -5,9 +5,9 @@ inputs:
   path: rabbitmq_codegen
 - name: rabbitmq-erlang-client-master
   path: amqp_client
-- name: rabbimq-common-master
+- name: rabbitmq-common-master
   path: rabbit_common
-- name: rabbitmq-server
+- name: rabbitmq-server-master
   path: rabbit
 image_resource:
   type: docker-image
