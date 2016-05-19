@@ -4,7 +4,7 @@ inputs:
 - name: rabbitmq-codegen-master
   path: rabbitmq-codegen
 - name: rabbitmq-erlang-client-master
-  path: ./amqp_client
+  path: amqp_client
 - name: rabbimq-common-master
   path: rabbit_common
 - name: rabbitmq-server
