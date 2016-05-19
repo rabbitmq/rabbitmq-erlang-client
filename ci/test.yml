@@ -14,4 +14,4 @@ image_resource:
   source:
     repository: pivotalrabbitmq/ci
 run:
-  path: rabbitmq-erlang-client-master/ci/test.sh
+  path: amqp_client/ci/test.sh
