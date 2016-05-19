@@ -2,7 +2,7 @@
 platform: linux
 inputs:
 - name: rabbitmq-codegen-master
-  path: rabbitmq-codegen
+  path: rabbitmq_codegen
 - name: rabbitmq-erlang-client-master
   path: amqp_client
 - name: rabbimq-common-master
@@ -14,4 +14,4 @@ image_resource:
   source:
     repository: pivotalrabbitmq/ci
 run:
-  path: amqp_client/ci/test.sh
+  path: rabbitmq-erlang-client-master/ci/test.sh
