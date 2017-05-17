@@ -38,7 +38,7 @@
                 connected_at
                }).
 
--define(INFO_KEYS, [type]).
+-define(INFO_KEYS, [type, internal_user]).
 
 -define(CREATION_EVENT_KEYS, [pid, protocol, host, port, name,
                               peer_host, peer_port,
