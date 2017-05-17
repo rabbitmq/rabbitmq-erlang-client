@@ -569,7 +569,7 @@ no_something(Config) ->
 %% -------------------------------------------------------------------
 
 no_vhost(Config) ->
-    {error, not_allowed} = new_connection(Config),
+    {error, not_found} = new_connection(Config),
     ok.
 
 %% -------------------------------------------------------------------
@@ -1204,7 +1204,7 @@ invalid_password(Config) ->
 %% -------------------------------------------------------------------
 
 non_existent_vhost(Config) ->
-    {error, not_allowed} = new_connection(Config).
+    {error, not_found} = new_connection(Config).
 
 %% -------------------------------------------------------------------
 
