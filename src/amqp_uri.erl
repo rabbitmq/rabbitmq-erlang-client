@@ -161,7 +161,7 @@ set(KVs, Ps, Fields) ->
     Ps1.
 
 build_ssl_broker(ParsedUri, DefaultVHost) ->
-    Params = build_broker(ParsedUri, DefaultVHost),
+    Params0 = build_broker(ParsedUri, DefaultVHost),
     Query = proplists:get_value('query', ParsedUri),
     SSLOptions =
         run_state_monad(
@@ -177,15 +177,17 @@ build_ssl_broker(ParsedUri, DefaultVHost) ->
                               L
                       end
            end || {Fun, Key} <-
-                      [{fun find_path_parameter/1,    cacertfile},
-                       {fun find_path_parameter/1,    certfile},
-                       {fun find_path_parameter/1,    keyfile},
-                       {fun find_atom_parameter/1,    verify},
+                      [{fun find_path_parameter/1, cacertfile},
+                       {fun find_path_parameter/1, certfile},
+                       {fun find_path_parameter/1, keyfile},
+                       {fun find_atom_parameter/1, verify},
                        {fun find_boolean_parameter/1, fail_if_no_peer_cert},
                        {fun find_identity_parameter/1, password},
-                       {fun find_integer_parameter/1,  depth}]],
+                       {fun find_sni_parameter/1, server_name_indication},
+                       {fun find_integer_parameter/1, depth}]],
           []),
-    Params#amqp_params_network{ssl_options = SSLOptions}.
+    Params1 = Params0#amqp_params_network{ssl_options = SSLOptions},
+    amqp_ssl:maybe_enhance_ssl_options(Params1).
 
 broker_add_query(Params = #amqp_params_direct{}, Uri) ->
     broker_add_query(Params, Uri, record_info(fields, amqp_params_direct));
@@ -229,6 +231,11 @@ parse_amqp_param(Field, String) ->
     fail({parameter_unconfigurable_in_query, Field, String}).
 
 find_path_parameter(Value) ->
+    find_identity_parameter(Value).
+
+find_sni_parameter("disable") ->
+    disable;
+find_sni_parameter(Value) ->
     find_identity_parameter(Value).
 
 find_identity_parameter(Value) -> return(Value).
