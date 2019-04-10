@@ -33,7 +33,7 @@
 
 %% The wait constant defines how long a consumer waits before it
 %% unsubscribes
--define(WAIT, 10000).
+-define(WAIT, 100000).
 
 %% How to long wait for a process to die after an expected failure
 -define(PROCESS_EXIT_TIMEOUT, 5000).
@@ -783,8 +783,12 @@ abstract_method_serialization_test(Test, Config,
                                                        type = <<"topic">>}),
     BeforeRet = BeforeFun(Channel, X),
     Parent = self(),
-    [spawn(fun () -> Ret = [MultiOpFun(Channel, X, Payload, BeforeRet, I)
+    [spawn_link(fun () ->
+                Time = erlang:system_time(millisecond),
+                Ret = [MultiOpFun(Channel, X, Payload, BeforeRet, I)
                             || _ <- lists:seq(1, OpsPerProcess)],
+                ct:pal("~p: Time to do ~p operations ~p",
+                       [Test, OpsPerProcess, erlang:system_time(millisecond) - Time]),
                    Parent ! {finished, Ret}
            end) || I <- lists:seq(1, ?LATCH)],
     MultiOpRet = latch_loop(?LATCH),
