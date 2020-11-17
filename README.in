@@ -1,10 +1,4 @@
-README.in:
+## This was migrated to https://github.com/rabbitmq/rabbitmq-server
 
-Please see https://www.rabbitmq.com/build-erlang-client.html for build
-instructions.
-
-For your convenience, a text copy of these instructions is available
-below. Please be aware that the instructions here may not be as up to
-date as those at the above URL.
-
-===========================================================================
+This repository has been moved to the main unified RabbitMQ "monorepo", including all open issues. You can find the source under [/deps/amqp_client](https://github.com/rabbitmq/rabbitmq-server/tree/master/deps/amqp_client).
+All issues have been transferred.
